@@ -24,8 +24,8 @@ jobs:
       REF: ${{ inputs.ref || '84dee43' }}
 
     steps:
-      # Checkout is optional, but keeps run logs/artifacts associated with your repo.
-      - name: Checkout trivial stub
+      # Optional – keeps logs/artifacts tied to your repo
+      - name: Checkout stub
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
@@ -39,28 +39,32 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-
-      - name: Gradle cache
-        uses: gradle/gradle-build-action@v3
-        with:
-          build-root-directory: Wild_KSU
+        # Uncomment if AGP demands explicit packages:
+        # with:
+        #   packages: |
+        #     platforms;android-34
+        #     build-tools;34.0.0
 
       - name: Clone Wild_KSU and pin ref
         run: |
           set -euxo pipefail
           git clone https://github.com/WildKernels/Wild_KSU.git
           cd Wild_KSU
-          # Make sure all refs are available (branches/tags) and we can resolve SHAs
           git fetch --all --tags
           if git rev-parse --verify --quiet "${REF}^{commit}" >/dev/null; then
             git checkout "${REF}"
           else
-            # Maybe 'REF' is a remote branch or tag name we didn't fetch by default
             git fetch origin "${REF}"
             git checkout FETCH_HEAD
           fi
           git rev-parse --short HEAD
           git log -1 --pretty=oneline
+
+      # ✅ Run Gradle cache only after the Gradle files exist
+      - name: Gradle cache
+        uses: gradle/gradle-build-action@v3
+        with:
+          build-root-directory: Wild_KSU
 
       - name: Make Gradle wrapper executable
         working-directory: Wild_KSU
@@ -70,7 +74,7 @@ jobs:
         working-directory: Wild_KSU
         run: |
           set -euxo pipefail
-          # Title-case build type for Gradle task suffix: debug->Debug, release->Release
+          # Title-case suffix for Gradle task
           TAIL="$(tr '[:lower:]' '[:upper:]' <<< ${BUILD_TYPE:0:1})${BUILD_TYPE:1}"
           ./gradlew --no-daemon --stacktrace clean "assemble${TAIL}"
 
@@ -90,7 +94,7 @@ jobs:
           path: Wild_KSU/**/build/outputs/apk/*/*.apk
           if-no-files-found: error
 
-      # ------- OPTIONAL: Signing (uncomment + configure secrets) -------
+      # -------- OPTIONAL SIGNING --------
       # - name: Decode keystore
       #   if: ${{ env.BUILD_TYPE == 'release' }}
       #   working-directory: Wild_KSU
@@ -106,5 +110,4 @@ jobs:
       #     ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
       #     ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
       #     ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-      #   run: |
-      #     ./gradlew --no-daemon --stacktrace clean assembleRelease
+      #   run: ./gradlew --no-daemon --stacktrace clean assembleRelease
