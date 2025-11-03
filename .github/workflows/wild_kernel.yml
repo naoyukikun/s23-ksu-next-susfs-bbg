@@ -68,6 +68,13 @@ jobs:
           cp -rv ./susfs4ksu/kernel_patches/fs/* fs/
           cp -rv ./susfs4ksu/kernel_patches/include/linux/* include/linux/
           patch -p1 --fuzz=3 < "${GITHUB_WORKSPACE}/rezoss_susfs1512.patch"
+
+           # Cherry pick SUKISU commit 9cd35c4
+          curl -L -o 9cd35c4.patch https://github.com/SukiSU-Ultra/SukiSU-Ultra/commit/9cd35c47dab24c25381a1ff8c4445f8daa02ddd5.patch
+          cd ./KernelSU-Next/
+          patch -p1 --fuzz=3 <  ../9cd35c4.patch
+          #sed -i '1i #pragma once' ./kernel/ksu.h
+          cd ..
           [ -d KernelSU-Next ] && mv -f KernelSU-Next Wild_KSU
           
           # Integrate scope-minimized manual KernelSU hooks via a patch
