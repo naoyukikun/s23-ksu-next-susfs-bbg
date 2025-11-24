@@ -53,7 +53,7 @@ jobs:
                
           
           # Integrate latest SUSFS
-          git clone -b gki-android13-5.15 --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git susfs4ksu
+          git clone https://gitlab.com/simonpunk/susfs4ksu.git susfs4ksu
 
           # Determine susfs version
           cd susfs4ksu
