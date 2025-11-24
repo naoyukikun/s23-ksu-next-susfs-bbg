@@ -52,7 +52,7 @@ jobs:
           echo "NEXT_VER_CODE=$NEXT_VER_CODE" >> "$GITHUB_ENV"
                
           
-          # Integrate latest SUSFS
+          # Integrate compatible SUSFS
           git clone https://gitlab.com/simonpunk/susfs4ksu.git susfs4ksu
 
           # Determine susfs version
