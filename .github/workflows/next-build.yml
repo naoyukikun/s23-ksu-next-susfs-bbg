@@ -1,5 +1,5 @@
 # Script github action kanged from Ivan @reddxae with little bit my modification and addition
-name: Build kernel (KSU Next Dev, susfs, scope-minimized manual hooks 1.4 and BBG integration)
+name: Build kernel (KSU Next Dev, susfs, scope-minimized manual hooks 1.4)
 on:
   #schedule:
     #- cron: '0 4 * * *'  # Runs every day at 04:00 UTC
