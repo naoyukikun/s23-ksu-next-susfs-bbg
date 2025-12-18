@@ -61,8 +61,8 @@ jobs:
           cd ..
 
           # Begin susfs patching
-          cp  ./susfs4ksu/kernel_patches/fs/* ./fs/
-          cp  ./susfs4ksu/kernel_patches/include/linux/* ./include/linux/
+          cp -r  ./susfs4ksu/kernel_patches/fs/* ./fs/
+          cp -r ./susfs4ksu/kernel_patches/include/linux/* ./include/linux/
           patch -p1 --fuzz=3 < "${GITHUB_WORKSPACE}/rezoss_next3_susfs2.patch"
           
           # Integrate manual hook 1.6
