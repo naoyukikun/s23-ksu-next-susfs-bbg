@@ -642,13 +642,12 @@ diff --git a/KernelSU/kernel/setuid_hook.c b/KernelSU/kernel/setuid_hook.c
 index b9bedb3f..459872a9 100644
 --- a/KernelSU/kernel/setuid_hook.c
 +++ b/KernelSU/kernel/setuid_hook.c
-@@ -11,6 +11,10 @@
+@@ -11,6 +11,9 @@
  #include <linux/types.h>
  #include <linux/uaccess.h>
  #include <linux/uidgid.h>
-+#include <linux/stat.h>
 +#ifdef CONFIG_KSU_SUSFS
-+#include <linux/susfs.h>
++#include <linux/susfs_def.h>
 +#endif // #ifdef CONFIG_KSU_SUSFS
  
  #include "allowlist.h"
