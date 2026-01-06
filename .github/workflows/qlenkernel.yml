@@ -1,4 +1,4 @@
-name: Build kernel (KSU Next Kprobes & BBG)
+name: Build kernel qlenlen (KSU Next Kprobes & BBG)
 on:
   workflow_dispatch: # Allow manual trigger
 
