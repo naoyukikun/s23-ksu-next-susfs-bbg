@@ -1,4 +1,4 @@
-name: Build kernel (KSU Next Kprobes & BBG)
+name: Build kernel (KSU Next Kprobes)
 on:
   workflow_dispatch: # Allow manual trigger
 
@@ -82,7 +82,7 @@ jobs:
           cp kernel/out/arch/arm64/boot/Image.gz anykernel/
           
           # Build final name (Removed SUSFS and Manual Hook refs, added Kprobes)
-          ZIP_NAME="common-5.15.${KERNEL_VERSION}-3d64R-next${KSUNEXT_VERSION}_${NEXT_VER_CODE}-kprobes-BBG-$(date +%d%m%y-%H%M%S)"
+          ZIP_NAME="common-5.15.${KERNEL_VERSION}-3d64R-next${KSUNEXT_VERSION}_${NEXT_VER_CODE}"
           
           cd anykernel
           zip -r0 ../"${ZIP_NAME}".zip ./*
