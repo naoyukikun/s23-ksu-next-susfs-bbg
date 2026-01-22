@@ -1,5 +1,5 @@
 # Script github action kanged from Ivan @reddxae with little bit my modification and addition
-name: Build kernel (Wild_KSU-DEV, SUSFS 2.0, Manual hooks 1.6 and BBG integration)
+name: Build kernel (Wild_KSU, SUSFS 2.0, Manual hooks 1.6 and BBG integration)
 on:
   #schedule:
     #- cron: '0 4 * * *'  # Runs every day at 04:00 UTC
