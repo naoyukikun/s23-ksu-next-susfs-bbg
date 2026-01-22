@@ -1,5 +1,5 @@
 # Script github action kanged from Ivan @reddxae with little bit my modification and addition
-name: Build kernel (Wild_KSU-DEV, SUSFS 2.0, Manual hooks 1.6)
+name: Build kernel (Wild_KSU, SUSFS 2.0, Manual hooks 1.6)
 on:
   #schedule:
     #- cron: '0 4 * * *'  # Runs every day at 04:00 UTC
@@ -72,10 +72,10 @@ jobs:
           echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> ./arch/arm64/configs/gki_defconfig   
 
           # Adding BBG support
-          #wget -O- https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
-          #echo "CONFIG_BBG=y" >> ./arch/arm64/configs/gki_defconfig
-          #sed -i 's/\(CONFIG_LSM="[^"]*\)"/\1,baseband_guard"/' ./arch/arm64/configs/gki_defconfig
-          #sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/lockdown/lockdown,baseband_guard/ } }' ./security/Kconfig
+          # wget -O- https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
+          # echo "CONFIG_BBG=y" >> ./arch/arm64/configs/gki_defconfig
+          # sed -i 's/\(CONFIG_LSM="[^"]*\)"/\1,baseband_guard"/' ./arch/arm64/configs/gki_defconfig
+          # sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/lockdown/lockdown,baseband_guard/ } }' ./security/Kconfig
           
 
       - name: Set up swap space
