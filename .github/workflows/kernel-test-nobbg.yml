@@ -82,8 +82,8 @@ jobs:
           git config --global user.name "naoyukikun"
           
           # 2. Add LRNG (Linux Random Number Generator)
-          git clone --depth=1 -b master https://github.com/smuellerDD/lrng.git ../lrng_src
-          git am -3 ../lrng_src/kernel_patches/v5.15/*.patch || echo "LRNG patches partially failed, manual check required"
+          # git clone --depth=1 -b master https://github.com/smuellerDD/lrng.git ../lrng_src
+          # git am -3 ../lrng_src/kernel_patches/v5.15/*.patch || echo "LRNG patches partially failed, manual check required"
 
           # 3. Port LZ4 1.9.x FAST_DEC_LOOP
           curl -LSs https://raw.githubusercontent.com/Arter97/android_kernel_common/master/lib/lz4/lz4_decompress.c > lib/lz4/lz4_decompress.c
@@ -93,7 +93,7 @@ jobs:
           
           # Use a block to avoid repeating 'echo >> $DEFCONFIG'
           {
-            echo "CONFIG_LRNG=y"
+            # echo "CONFIG_LRNG=y"
             echo "CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y"
             echo "CONFIG_ZRAM_DEF_COMP_LZ4=y"
             echo "CONFIG_ZSTD_COMPRESS=y"
