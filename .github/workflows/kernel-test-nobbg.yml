@@ -1,7 +1,10 @@
-name: Build kernel (KSU Next Kprobes)
+# Script github action kanged from Ivan @reddxae with little bit my modification and addition
+name: Build kernel (Wild_KSU, SUSFS 2.0, Manual hooks 1.6 TESTING)
 on:
-  workflow_dispatch: # Allow manual trigger
-
+  #schedule:
+    #- cron: '0 4 * * *'  # Runs every day at 04:00 UTC
+  workflow_dispatch: # Allow manual trigger if needed
+  
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -12,16 +15,14 @@ jobs:
       - name: Set up the toolchain
         run: |
           sudo apt update
-          sudo apt purge -y firefox
-          sudo apt-mark hold firefox
-          sudo apt upgrade -y
+          sudo apt install -y lz4 liblz4-dev
           sudo apt install -y \
-          bc bison flex build-essential git curl \
-          libelf-dev libssl-dev liblz4-tool lz4 \
-          pahole dwarves cpio \
-          python3 python-is-python3 \
-          tar perl zip zlib1g-dev
-
+            bc bison build-essential curl flex \
+            g++-multilib gcc-multilib git gnupg \
+            lib32readline-dev lib32z1-dev \
+            libelf-dev liblz4-tool libssl-dev \
+            lzop zlib1g-dev pahole dwarves cpio zip \
+            python3 python-is-python3 tar perl lz4 jq
 
       - name: Clone source
         run: |
@@ -31,35 +32,90 @@ jobs:
           # Determine the current kernel version
           echo "KERNEL_VERSION=$(grep -m1 '^SUBLEVEL =' ./kernel/Makefile | awk '{print $3}')" >> $GITHUB_ENV
           
-      - name: Apply KernelSU Next (Kprobes) and Baseband Guard
+      - name: Apply the Wild_KSU, SUSFS, manual hooks patch and Baseband Guard
         run: |
           set -euxo pipefail
           cd kernel
-          
-          # --- KernelSU Next Setup ---
-          # Determine the tag of the latest release of KernelSU Next
-          echo "KSUNEXT_VERSION=$(curl -s "https://api.github.com/repos/KernelSU-Next/KernelSU-Next/tags" \
+          # Determine the tag of the latest release of Wild_KSU
+          echo "WILD_KSU_VERSION=$(curl -s "https://api.github.com/repos/Wildkernels/Wild_KSU/tags" \
           | jq -r '.[0].name' | sed 's/^v//' | tr -d '.')" >> $GITHUB_ENV
 
-          # Integrate the latest DEV version of KernelSU Next into the source
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s dev
-
-          # Compute version code
-          COMMITS="$(git -C "./KernelSU-Next" rev-list --count HEAD || echo 0)"
-          NEXT_VER_CODE=$((30000 + COMMITS))
-          echo "NEXT_VER_CODE=$NEXT_VER_CODE" >> "$GITHUB_ENV"
+          # Integrate the latest version of Wild_KSU into the source
+          curl -LSs "https://raw.githubusercontent.com/WildKernels/Wild_KSU/wild/kernel/setup.sh" | bash -s wild
           
-          # --- Configure Kprobes (Default Hook Method) ---
-          # We force enable Kprobes in the config to ensure KSU works without manual hooks
-          echo "CONFIG_KPROBES=y" >> ./arch/arm64/configs/gki_defconfig
-          echo "CONFIG_HAVE_KPROBES=y" >> ./arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KPROBE_EVENTS=y" >> ./arch/arm64/configs/gki_defconfig
 
-          # --- Adding BBG support ---
-          #wget -O- https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
-          #echo "CONFIG_BBG=y" >> ./arch/arm64/configs/gki_defconfig
-          #sed -i 's/\(CONFIG_LSM="[^"]*\)"/\1,baseband_guard"/' ./arch/arm64/configs/gki_defconfig
-          #sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/lockdown/lockdown,baseband_guard/ } }' ./security/Kconfig
+          # Compute version code = commit count + 10200 (same scheme as KernelSU CI)
+          COMMITS="$(git -C "./Wild_KSU" rev-list --count HEAD || echo 0)"
+          WILD_VER_CODE=$((30000 + COMMITS))
+          echo "WILD_VER_CODE=$WILD_VER_CODE" >> "$GITHUB_ENV"              
+          
+          # Integrate latest SUSFS
+          git clone -b gki-android13-5.15 --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git susfs4ksu
+
+          # Determine susfs version
+          cd susfs4ksu
+          SUSFS_COMMIT=$(git rev-parse --short HEAD)
+          SUSFS_VERSION=$(sed -n 's/.*#define[[:space:]]\+SUSFS_VERSION[[:space:]]\+"v\{0,1\}\([0-9.]\+\)".*/\1/p' kernel_patches/include/linux/susfs.h | tr -d '.')
+          echo "SUSFS_VERSION=$SUSFS_VERSION" >> "$GITHUB_ENV"
+          echo "SUSFS_COMMIT=$SUSFS_COMMIT" >> "$GITHUB_ENV"
+          cd ..
+
+          # Begin susfs patching
+          #cp ./susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./Wild_KSU/
+          cp ./susfs4ksu/kernel_patches/50_add_susfs_in_gki-android13-5.15.patch ./
+          cp -rv ./susfs4ksu/kernel_patches/fs/* fs/
+          cp -rv ./susfs4ksu/kernel_patches/include/linux/* include/linux/
+          patch -p1 --fuzz=3 < ./50_add_susfs_in_gki-android13-5.15.patch
+                    
+          # Integrate Sukisu scope_min_manual_hooks_v1.6.patch
+          curl -L -o manual-hook.patch https://github.com/SukiSU-Ultra/SukiSU_patch/raw/83aa64b7548890bb1f2eff6c990c03a1802df27b/hooks/scope_min_manual_hooks_v1.6.patch
+          patch -p1 --fuzz=3 < manual-hook.patch
+          echo "CONFIG_KSU_KPROBES_HOOK=n" >> ./arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> ./arch/arm64/configs/gki_defconfig   
+
+      - name: Add LRNG and Performance Tweaks
+        run: |
+          cd kernel
+          
+          # 1. Add LRNG (Linux Random Number Generator)
+          # We use the v5.15 branch patches since your repo is android13-5.15
+          git clone --depth=1 -b master https://github.com/smuellerDD/lrng.git ../lrng_src
+          # Apply the core patches for 5.15 (adjust version if needed)
+          git am ../lrng_src/kernel_patches/v5.15/*.patch || echo "LRNG patches partially failed, manual check required"
+
+          # 2. Port LZ4 1.9.x FAST_DEC_LOOP
+          # This is a common performance backport for ARM64
+          curl -LSs https://raw.githubusercontent.com/Arter97/android_kernel_common/master/lib/lz4/lz4_decompress.c > lib/lz4/lz4_decompress.c
+
+          # 3. Modify gki_defconfig for optimizations
+          DEFCONFIG="arch/arm64/configs/gki_defconfig"
+          
+          # Enable Power-efficient workqueues
+          echo "CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y" >> $DEFCONFIG
+          
+          # Set ZRAM to built-in (y) instead of module (m) and set default LZ4
+          sed -i 's/CONFIG_ZRAM=m/CONFIG_ZRAM=y/' $DEFCONFIG
+          sed -i 's/CONFIG_ZSMALLOC=m/CONFIG_ZSMALLOC=y/' $DEFCONFIG
+          echo "CONFIG_ZRAM_DEF_COMP_LZ4=y" >> $DEFCONFIG
+          
+          # Enable ZSTD API
+          echo "CONFIG_ZSTD_COMPRESS=y" >> $DEFCONFIG
+          echo "CONFIG_ZSTD_DECOMPRESS=y" >> $DEFCONFIG
+          
+          # Disable Debugging Bloat
+          # sed -i 's/CONFIG_SLUB_DEBUG=y/CONFIG_SLUB_DEBUG=n/' $DEFCONFIG
+          # echo "CONFIG_DEBUG_MISC=n" >> $DEFCONFIG
+          # echo "CONFIG_KALLSYMS_ALL=n" >> $DEFCONFIG
+          # echo "CONFIG_DEBUG_PREEMPT=n" >> $DEFCONFIG
+          
+          # Final LRNG Config
+          echo "CONFIG_LRNG=y" >> $DEFCONFIG
+
+          # Adding BBG support
+          # wget -O- https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
+          # echo "CONFIG_BBG=y" >> ./arch/arm64/configs/gki_defconfig
+          # sed -i 's/\(CONFIG_LSM="[^"]*\)"/\1,baseband_guard"/' ./arch/arm64/configs/gki_defconfig
+          # sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/lockdown/lockdown,baseband_guard/ } }' ./security/Kconfig
           
 
       - name: Set up swap space
@@ -69,21 +125,18 @@ jobs:
 
       - name: Build the kernel
         run: |
-          set -euxo pipefail
           cd kernel
           chmod +x scripts/build.sh
           ./scripts/build.sh 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
-
+    
       - name: Package image with AnyKernel3
         id: package
         run: |
           set -euxo pipefail
           unzip "${GITHUB_WORKSPACE}/anykernel.zip" -d anykernel/
           cp kernel/out/arch/arm64/boot/Image.gz anykernel/
-          
-          # Build final name (Removed SUSFS and Manual Hook refs, added Kprobes)
-          ZIP_NAME="common-5.15.${KERNEL_VERSION}-3d64R-next${KSUNEXT_VERSION}_${NEXT_VER_CODE}"
-          
+          # Build final name
+          ZIP_NAME="common-5.15.${KERNEL_VERSION}-3d64R-wild${WILD_KSU_VERSION}_${WILD_VER_CODE}-susfs${SUSFS_VERSION}_${SUSFS_COMMIT}-manual"
           cd anykernel
           zip -r0 ../"${ZIP_NAME}".zip ./*
           echo "zip_path=$GITHUB_WORKSPACE/${ZIP_NAME}.zip" >> "$GITHUB_OUTPUT"
@@ -102,8 +155,8 @@ jobs:
         with:
           tag_name: experimental_build-${{ github.run_id }} 
           target_commitish: ${{ github.sha }}
-          name: "Kernel Build by ${{ github.repository }}"
+          name: "Wild_KSU Kernel Build by ${{ github.repository }}"
           generate_release_notes: true
           files: ${{ steps.package.outputs.zip_path }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   
