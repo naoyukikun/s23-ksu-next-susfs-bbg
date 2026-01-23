@@ -76,40 +76,36 @@ jobs:
       - name: Add LRNG and Performance Tweaks
         run: |
           cd kernel
-          
-          # 1. Add LRNG (Linux Random Number Generator)
-          # We use the v5.15 branch patches since your repo is android13-5.15
-          git clone --depth=1 -b master https://github.com/smuellerDD/lrng.git ../lrng_src
-          # Apply the core patches for 5.15 (adjust version if needed)
-          git am ../lrng_src/kernel_patches/v5.15/*.patch || echo "LRNG patches partially failed, manual check required"
 
-          # 2. Port LZ4 1.9.x FAST_DEC_LOOP
-          # This is a common performance backport for ARM64
+          # 1. Set Identity for patching
+          git config --global user.email "ishaqluqman656@gmail.com"
+          git config --global user.name "naoyukikun"
+          
+          # 2. Add LRNG (Linux Random Number Generator)
+          git clone --depth=1 -b master https://github.com/smuellerDD/lrng.git ../lrng_src
+          git am -3 ../lrng_src/kernel_patches/v5.15/*.patch || echo "LRNG patches partially failed, manual check required"
+
+          # 3. Port LZ4 1.9.x FAST_DEC_LOOP
           curl -LSs https://raw.githubusercontent.com/Arter97/android_kernel_common/master/lib/lz4/lz4_decompress.c > lib/lz4/lz4_decompress.c
 
-          # 3. Modify gki_defconfig for optimizations
+          # 4. Modify gki_defconfig for optimizations
           DEFCONFIG="arch/arm64/configs/gki_defconfig"
           
-          # Enable Power-efficient workqueues
-          echo "CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y" >> $DEFCONFIG
+          # Use a block to avoid repeating 'echo >> $DEFCONFIG'
+          {
+            echo "CONFIG_LRNG=y"
+            echo "CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y"
+            echo "CONFIG_ZRAM_DEF_COMP_LZ4=y"
+            echo "CONFIG_ZSTD_COMPRESS=y"
+            echo "CONFIG_ZSTD_DECOMPRESS=y"
+            # Optional: Disable Debugging for performance
+            # echo "CONFIG_SLUB_DEBUG=n"
+            # echo "CONFIG_DEBUG_MISC=n"
+          } >> $DEFCONFIG
           
-          # Set ZRAM to built-in (y) instead of module (m) and set default LZ4
+          # Set ZRAM and ZSMALLOC to built-in (y)
           sed -i 's/CONFIG_ZRAM=m/CONFIG_ZRAM=y/' $DEFCONFIG
           sed -i 's/CONFIG_ZSMALLOC=m/CONFIG_ZSMALLOC=y/' $DEFCONFIG
-          echo "CONFIG_ZRAM_DEF_COMP_LZ4=y" >> $DEFCONFIG
-          
-          # Enable ZSTD API
-          echo "CONFIG_ZSTD_COMPRESS=y" >> $DEFCONFIG
-          echo "CONFIG_ZSTD_DECOMPRESS=y" >> $DEFCONFIG
-          
-          # Disable Debugging Bloat
-          # sed -i 's/CONFIG_SLUB_DEBUG=y/CONFIG_SLUB_DEBUG=n/' $DEFCONFIG
-          # echo "CONFIG_DEBUG_MISC=n" >> $DEFCONFIG
-          # echo "CONFIG_KALLSYMS_ALL=n" >> $DEFCONFIG
-          # echo "CONFIG_DEBUG_PREEMPT=n" >> $DEFCONFIG
-          
-          # Final LRNG Config
-          echo "CONFIG_LRNG=y" >> $DEFCONFIG
 
           # Adding BBG support
           # wget -O- https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
