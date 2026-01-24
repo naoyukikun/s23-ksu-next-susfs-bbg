@@ -26,8 +26,8 @@ jobs:
 
       - name: Clone source
         run: |
-          # git clone --depth=1 -b android13-5.15 https://github.com/samsung-sm8550/kernel_samsung_sm8550-common.git kernel
-          git clone --depth=1 -b android13-5.15 https://github.com/naoyukikun/kernel_samsung_sm8550-common.git kernel
+          git clone --depth=1 -b android13-5.15 https://github.com/samsung-sm8550/kernel_samsung_sm8550-common.git kernel
+          # git clone --depth=1 -b android13-5.15 https://github.com/naoyukikun/kernel_samsung_sm8550-common.git kernel
 
           # Determine the current kernel version
           echo "KERNEL_VERSION=$(grep -m1 '^SUBLEVEL =' ./kernel/Makefile | awk '{print $3}')" >> $GITHUB_ENV
@@ -83,11 +83,11 @@ jobs:
           
           # 2. Add LRNG (Linux Random Number Generator)
           # We copy the source directly instead of patching to avoid format errors
-          git clone --depth=1 -b master https://github.com/smuellerDD/lrng.git ../lrng_src
-          cp -f ../lrng_src/*.c drivers/char/
-          cp -f ../lrng_src/*.h drivers/char/
+          # git clone --depth=1 -b master https://github.com/smuellerDD/lrng.git ../lrng_src
+          # cp -f ../lrng_src/*.c drivers/char/
+          # cp -f ../lrng_src/*.h drivers/char/
           # Update the build system to include LRNG
-          echo "obj-\$(CONFIG_LRNG) += lrng_interface_dev.o lrng_interface_random_kernel.o lrng_interface_random_user.o lrng_drng_chacha20.o lrng_es_mgr.o lrng_es_irq.o lrng_es_cpu.o lrng_es_jent.o lrng_health.o" >> drivers/char/Makefile
+          # echo "obj-\$(CONFIG_LRNG) += lrng_interface_dev.o lrng_interface_random_kernel.o lrng_interface_random_user.o lrng_drng_chacha20.o lrng_es_mgr.o lrng_es_irq.o lrng_es_cpu.o lrng_es_jent.o lrng_health.o" >> drivers/char/Makefile
 
           
           # 3. Port LZ4 1.9.x (Fix for "404: Not Found" compiler error)
