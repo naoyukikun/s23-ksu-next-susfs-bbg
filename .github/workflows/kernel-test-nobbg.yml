@@ -116,6 +116,12 @@ jobs:
             echo "Creating missing hrtimer_api.h shim..."
             echo "#include <linux/hrtimer.h>" > include/linux/hrtimer_api.h
           fi
+
+          # 2. Fix ktime_api.h
+          if [ ! -f include/linux/ktime_api.h ]; then
+            echo "Creating missing ktime_api.h shim..."
+            echo "#include <linux/ktime.h>" > include/linux/ktime_api.h
+          fi
           
           # 3. Port LZ4 1.9.x (Fix for "404: Not Found" compiler error)
           # We use a reliable direct link to the Linux Mainline source
