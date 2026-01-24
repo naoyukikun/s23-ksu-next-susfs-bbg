@@ -84,33 +84,31 @@ jobs:
           # 2. Clone LRNG Repo
           git clone --depth=1 -b master https://github.com/smuellerDD/lrng.git ../lrng_src
           
-          # --- STAGE 1: PRE-PATCHES (Six-Digit) ---
-          # "apply all six-digit patches providing necessary code updates"
-          # We search for files like 515000-*.patch inside the backports folder
+          # --- STAGE 1: PRE-PATCHES (v60-xxxxxx-*.patch) ---
           echo "Stage 1: Applying 6-digit pre-patches..."
-          for patch in ../lrng_src/backports/v60-5.15.197/[0-9][0-9][0-9][0-9][0-9][0-9]*.patch; do
+          # Fix: Added 'v60-' prefix to match the actual filenames
+          for patch in ../lrng_src/backports/v60-5.15.197/v60-[0-9][0-9][0-9][0-9][0-9][0-9]*.patch; do
             echo "Applying $patch"
             patch -p1 < "$patch" || echo "⚠️ Pre-patch failed: $patch"
           done
 
           # --- STAGE 2: MAIN LRNG (Upstream) ---
-          # "apply all LRNG patches from upstream"
-          # The backport is named 'v60', so we use the v6.0 upstream patches
           echo "Stage 2: Applying Main LRNG v6.0 patches..."
           for patch in ../lrng_src/kernel_patches/v6.0/*.patch; do
+            # Skip cover letter to avoid "garbage" error
+            if [[ "$patch" == *"0000-cover-letter"* ]]; then continue; fi
+            
             echo "Applying $patch"
-            # Note: The instructions warn that "some hunks are expected", so we allow fuzzing
             patch -p1 --fuzz=3 < "$patch" || echo "⚠️ Main patch failed: $patch"
           done
 
-          # --- STAGE 3: POST-PATCHES (Two-Digit) ---
-          # "apply all two-digit patches providing code updates after LRNG"
+          # --- STAGE 3: POST-PATCHES (v60-xx-*.patch) ---
           echo "Stage 3: Applying 2-digit post-patches..."
-          for patch in ../lrng_src/backports/v60-5.15.197/[0-9][0-9]-*.patch; do
+          # Fix: Added 'v60-' prefix here as well
+          for patch in ../lrng_src/backports/v60-5.15.197/v60-[0-9][0-9]-*.patch; do
             echo "Applying $patch"
             patch -p1 < "$patch" || echo "⚠️ Post-patch failed: $patch"
           done
-
           
           # 3. Port LZ4 1.9.x (Fix for "404: Not Found" compiler error)
           # We use a reliable direct link to the Linux Mainline source
