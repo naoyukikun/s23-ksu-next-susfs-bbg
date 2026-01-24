@@ -161,10 +161,10 @@ jobs:
 
             # --- Tweak 5: Disable Debugging Overhead (Raw Performance) ---
             # Disabling SLUB_DEBUG reduces overhead for every memory allocation
-            echo "CONFIG_SLUB_DEBUG=n"
-            echo "CONFIG_PAGE_POISONING=n"
+            #echo "CONFIG_SLUB_DEBUG=n"
+            #echo "CONFIG_PAGE_POISONING=n"
             #echo "CONFIG_DEBUG_KERNEL=n"
-            echo "CONFIG_DEBUG_MISC=n"
+            #echo "CONFIG_DEBUG_MISC=n"
             #echo "CONFIG_DEBUG_INFO=n"
             
             # --- Tweak 6: Enable WireGuard (Faster VPN Support) ---
