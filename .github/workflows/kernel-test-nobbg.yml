@@ -81,13 +81,35 @@ jobs:
           git config --global user.email "ishaqluqman656@gmail.com"
           git config --global user.name "naoyukikun"
           
-          # 2. Add LRNG (Linux Random Number Generator)
-          # We copy the source directly instead of patching to avoid format errors
-          # git clone --depth=1 -b master https://github.com/smuellerDD/lrng.git ../lrng_src
-          # cp -f ../lrng_src/*.c drivers/char/
-          # cp -f ../lrng_src/*.h drivers/char/
-          # Update the build system to include LRNG
-          # echo "obj-\$(CONFIG_LRNG) += lrng_interface_dev.o lrng_interface_random_kernel.o lrng_interface_random_user.o lrng_drng_chacha20.o lrng_es_mgr.o lrng_es_irq.o lrng_es_cpu.o lrng_es_jent.o lrng_health.o" >> drivers/char/Makefile
+          # 2. Clone LRNG Repo
+          git clone --depth=1 -b master https://github.com/smuellerDD/lrng.git ../lrng_src
+          
+          # --- STAGE 1: PRE-PATCHES (Six-Digit) ---
+          # "apply all six-digit patches providing necessary code updates"
+          # We search for files like 515000-*.patch inside the backports folder
+          echo "Stage 1: Applying 6-digit pre-patches..."
+          for patch in ../lrng_src/backports/v60-5.15.197/[0-9][0-9][0-9][0-9][0-9][0-9]*.patch; do
+            echo "Applying $patch"
+            patch -p1 < "$patch" || echo "⚠️ Pre-patch failed: $patch"
+          done
+
+          # --- STAGE 2: MAIN LRNG (Upstream) ---
+          # "apply all LRNG patches from upstream"
+          # The backport is named 'v60', so we use the v6.0 upstream patches
+          echo "Stage 2: Applying Main LRNG v6.0 patches..."
+          for patch in ../lrng_src/kernel_patches/v6.0/*.patch; do
+            echo "Applying $patch"
+            # Note: The instructions warn that "some hunks are expected", so we allow fuzzing
+            patch -p1 --fuzz=3 < "$patch" || echo "⚠️ Main patch failed: $patch"
+          done
+
+          # --- STAGE 3: POST-PATCHES (Two-Digit) ---
+          # "apply all two-digit patches providing code updates after LRNG"
+          echo "Stage 3: Applying 2-digit post-patches..."
+          for patch in ../lrng_src/backports/v60-5.15.197/[0-9][0-9]-*.patch; do
+            echo "Applying $patch"
+            patch -p1 < "$patch" || echo "⚠️ Post-patch failed: $patch"
+          done
 
           
           # 3. Port LZ4 1.9.x (Fix for "404: Not Found" compiler error)
@@ -99,23 +121,23 @@ jobs:
           # sed -i 's/#include <linux\/unaligned.h>/#include <asm\/unaligned.h>/' lib/lz4/lz4_decompress.c
 
           # 4. Modify gki_defconfig for optimizations
-          DEFCONFIG="arch/arm64/configs/gki_defconfig"
+          # DEFCONFIG="arch/arm64/configs/gki_defconfig"
           
           # Use a block to avoid repeating 'echo >> $DEFCONFIG'
-          {
+          # {
             # echo "CONFIG_LRNG=y"
-            echo "CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y"
-            echo "CONFIG_ZRAM_DEF_COMP_LZ4=y"
-            echo "CONFIG_ZSTD_COMPRESS=y"
-            echo "CONFIG_ZSTD_DECOMPRESS=y"
+            # echo "CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y"
+            # echo "CONFIG_ZRAM_DEF_COMP_LZ4=y"
+            # echo "CONFIG_ZSTD_COMPRESS=y"
+            # echo "CONFIG_ZSTD_DECOMPRESS=y"
             # Optional: Disable Debugging for performance
-            echo "CONFIG_SLUB_DEBUG=n"
-            echo "CONFIG_DEBUG_MISC=n"
-          } >> $DEFCONFIG
+            # echo "CONFIG_SLUB_DEBUG=n"
+            # echo "CONFIG_DEBUG_MISC=n"
+          # } >> $DEFCONFIG
           
           # Set ZRAM and ZSMALLOC to built-in (y)
-          sed -i 's/CONFIG_ZRAM=m/CONFIG_ZRAM=y/' $DEFCONFIG
-          sed -i 's/CONFIG_ZSMALLOC=m/CONFIG_ZSMALLOC=y/' $DEFCONFIG
+          # sed -i 's/CONFIG_ZRAM=m/CONFIG_ZRAM=y/' $DEFCONFIG
+          # sed -i 's/CONFIG_ZSMALLOC=m/CONFIG_ZSMALLOC=y/' $DEFCONFIG
 
           # Adding BBG support
           # wget -O- https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
