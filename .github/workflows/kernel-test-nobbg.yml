@@ -149,7 +149,30 @@ jobs:
           {
             echo "CONFIG_LRNG=y"
             echo "CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y"
+            # --- Tweak 3: Enable TCP BBR (Better Network Speed) ---
+            echo "CONFIG_TCP_CONG_BBR=y"
+            echo "CONFIG_DEFAULT_BBR=y" 
+            
+            # --- Tweak 4: Enable MGLRU (Better Multitasking/RAM Management) ---
+            # This is native to 5.15 and extremely stable
+            echo "CONFIG_LRU_GEN=y"
+            echo "CONFIG_LRU_GEN_ENABLED=y"
+            echo "CONFIG_LRU_GEN_STATS=y"
+
+            # --- Tweak 5: Disable Debugging Overhead (Raw Performance) ---
+            # Disabling SLUB_DEBUG reduces overhead for every memory allocation
+            echo "CONFIG_SLUB_DEBUG=n"
+            echo "CONFIG_PAGE_POISONING=n"
+            #echo "CONFIG_DEBUG_KERNEL=n"
+            echo "CONFIG_DEBUG_MISC=n"
+            #echo "CONFIG_DEBUG_INFO=n"
+            
+            # --- Tweak 6: Enable WireGuard (Faster VPN Support) ---
+            #echo "CONFIG_WIREGUARD=y"
           } >> $DEFCONFIG
+          
+          # Force Default TCP to BBR
+          sed -i 's/CONFIG_DEFAULT_CUBIC=y/CONFIG_DEFAULT_BBR=y/' $DEFCONFIG
           
           # Set ZRAM and ZSMALLOC to built-in (y)
           # sed -i 's/CONFIG_ZRAM=m/CONFIG_ZRAM=y/' $DEFCONFIG
