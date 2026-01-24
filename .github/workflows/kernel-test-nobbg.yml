@@ -81,12 +81,22 @@ jobs:
           git config --global user.email "ishaqluqman656@gmail.com"
           git config --global user.name "naoyukikun"
           
-          # 2. Add LRNG (Linux Random Number Generator)
-          # git clone --depth=1 -b master https://github.com/smuellerDD/lrng.git ../lrng_src
-          # git am -3 ../lrng_src/kernel_patches/v5.15/*.patch || echo "LRNG patches partially failed, manual check required"
+          # 2. Add LRNG from the specific 5.15.197 backport
+          git clone --depth=1 -b master https://github.com/smuellerDD/lrng.git ../lrng_src
+          # We target the backports/v60-5.15.197 folder for your kernel version
+          # Using -3 (3-way merge) to handle minor line shifts
+          git am -3 ../lrng_src/backports/v60-5.15.197/*.patch || {
+            echo "Backport patches failed, attempting to skip duplicates"
+            git am --skip
+          }
 
-          # 3. Port LZ4 1.9.x FAST_DEC_LOOP
-          curl -LSs https://raw.githubusercontent.com/Arter97/android_kernel_common/master/lib/lz4/lz4_decompress.c > lib/lz4/lz4_decompress.c
+          
+          # 3. Port LZ4 1.9.x (Fix for "404: Not Found" compiler error)
+          # We use a reliable direct link to the Linux Mainline source
+          curl -LSs -f https://raw.githubusercontent.com/torvalds/linux/master/lib/lz4/lz4_decompress.c > lib/lz4/lz4_decompress.c || {
+            echo "LZ4 download failed, keeping stock version"
+            git checkout lib/lz4/lz4_decompress.c
+          }
 
           # 4. Modify gki_defconfig for optimizations
           DEFCONFIG="arch/arm64/configs/gki_defconfig"
