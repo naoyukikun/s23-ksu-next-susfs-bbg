@@ -96,6 +96,7 @@ jobs:
             echo "LZ4 download failed, keeping stock version"
             git checkout lib/lz4/lz4_decompress.c
           }
+          sed -i 's/#include <linux\/unaligned.h>/#include <asm\/unaligned.h>/' lib/lz4/lz4_decompress.c
 
           # 4. Modify gki_defconfig for optimizations
           DEFCONFIG="arch/arm64/configs/gki_defconfig"
