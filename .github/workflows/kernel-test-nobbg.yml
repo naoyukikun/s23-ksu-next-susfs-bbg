@@ -138,10 +138,18 @@ jobs:
           EOF
           sed -i '/#include "lrng_es_mgr.h"/i #include "lrng_compat_shim.h"' drivers/char/lrng/lrng_es_mgr.c
 
-          # --- FIX 4: REMOVE FAILING STATIC ASSERTION (UPDATED REGEX) ---
-          # Using regex '.*' to handle any tabs or spaces between words
-          echo "Removing problematic BUILD_BUG_ON..."
-          sed -i '/BUILD_BUG_ON.*sizeof(buflen).*LRNG_KCAPI_ALIGN/d' drivers/char/lrng/lrng_interface_kcapi.c
+          # --- FIX 4: REMOVE FAILING STATIC ASSERTION (PERL METHOD) ---
+          # We use Perl (-0777) to read the whole file and delete the assertion 
+          # even if it spans multiple lines.
+          echo "Removing problematic BUILD_BUG_ON with Perl..."
+          perl -i -0777 -pe 's/BUILD_BUG_ON\s*\(\s*sizeof\s*\(\s*buflen\s*\)\s*<\s*LRNG_KCAPI_ALIGN\s*\)\s*;//gs' drivers/char/lrng/lrng_interface_kcapi.c
+          
+          # Verification: Check if the assertion is actually gone
+          if grep -q "LRNG_KCAPI_ALIGN" drivers/char/lrng/lrng_interface_kcapi.c; then
+            echo "⚠️ Warning: The assertion might still be there!"
+          else
+            echo "✅ Success: Assertion removed."
+          fi
 
           # 4. Modify gki_defconfig for optimizations
           DEFCONFIG="arch/arm64/configs/gki_defconfig"
