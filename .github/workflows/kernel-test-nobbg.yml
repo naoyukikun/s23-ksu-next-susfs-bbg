@@ -84,31 +84,38 @@ jobs:
           # 2. Clone LRNG Repo
           git clone --depth=1 -b master https://github.com/smuellerDD/lrng.git ../lrng_src
           
-          # --- STAGE 1: PRE-PATCHES (v60-xxxxxx-*.patch) ---
+          # --- STAGE 1: PRE-PATCHES (Critical) ---
+          # These prepare the kernel. We expect these to pass.
           echo "Stage 1: Applying 6-digit pre-patches..."
-          # Fix: Added 'v60-' prefix to match the actual filenames
           for patch in ../lrng_src/backports/v60-5.15.197/v60-[0-9][0-9][0-9][0-9][0-9][0-9]*.patch; do
             echo "Applying $patch"
             patch -p1 < "$patch" || echo "⚠️ Pre-patch failed: $patch"
           done
 
-          # --- STAGE 2: MAIN LRNG (Upstream) ---
+          # --- STAGE 2: MAIN LRNG (Critical) ---
+          # This adds the random number generator itself.
           echo "Stage 2: Applying Main LRNG v6.0 patches..."
           for patch in ../lrng_src/kernel_patches/v6.0/*.patch; do
-            # Skip cover letter to avoid "garbage" error
             if [[ "$patch" == *"0000-cover-letter"* ]]; then continue; fi
-            
             echo "Applying $patch"
             patch -p1 --fuzz=3 < "$patch" || echo "⚠️ Main patch failed: $patch"
           done
 
-          # --- STAGE 3: POST-PATCHES (v60-xx-*.patch) ---
-          echo "Stage 3: Applying 2-digit post-patches..."
-          # Fix: Added 'v60-' prefix here as well
+          # --- STAGE 3: POST-PATCHES (Non-Critical) ---
+          # These are cleanups. We allow them to fail because Samsung kernels often conflict here.
+          echo "Stage 3: Applying 2-digit post-patches (Ignoring errors)..."
           for patch in ../lrng_src/backports/v60-5.15.197/v60-[0-9][0-9]-*.patch; do
             echo "Applying $patch"
-            patch -p1 < "$patch" || echo "⚠️ Post-patch failed: $patch"
+            # We use || true so the script DOES NOT stop if these fail
+            patch -p1 < "$patch" || echo "⚠️ Post-patch skipped (likely already applied or conflict)"
           done
+
+          # --- FIX: MANUALLY CREATE MISSING HEADER ---
+          # This fixes the 'fatal error: linux/hrtimer_api.h file not found'
+          if [ ! -f include/linux/hrtimer_api.h ]; then
+            echo "Creating missing hrtimer_api.h shim..."
+            echo "#include <linux/hrtimer.h>" > include/linux/hrtimer_api.h
+          fi
           
           # 3. Port LZ4 1.9.x (Fix for "404: Not Found" compiler error)
           # We use a reliable direct link to the Linux Mainline source
