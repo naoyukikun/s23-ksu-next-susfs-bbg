@@ -132,19 +132,19 @@ jobs:
           # sed -i 's/#include <linux\/unaligned.h>/#include <asm\/unaligned.h>/' lib/lz4/lz4_decompress.c
 
           # 4. Modify gki_defconfig for optimizations
-          # DEFCONFIG="arch/arm64/configs/gki_defconfig"
+          DEFCONFIG="arch/arm64/configs/gki_defconfig"
           
           # Use a block to avoid repeating 'echo >> $DEFCONFIG'
-          # {
-            # echo "CONFIG_LRNG=y"
-            # echo "CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y"
+          {
+            echo "CONFIG_LRNG=y"
+            echo "CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y"
             # echo "CONFIG_ZRAM_DEF_COMP_LZ4=y"
             # echo "CONFIG_ZSTD_COMPRESS=y"
             # echo "CONFIG_ZSTD_DECOMPRESS=y"
             # Optional: Disable Debugging for performance
-            # echo "CONFIG_SLUB_DEBUG=n"
-            # echo "CONFIG_DEBUG_MISC=n"
-          # } >> $DEFCONFIG
+            #echo "CONFIG_SLUB_DEBUG=n"
+            #echo "CONFIG_DEBUG_MISC=n"
+          } >> $DEFCONFIG
           
           # Set ZRAM and ZSMALLOC to built-in (y)
           # sed -i 's/CONFIG_ZRAM=m/CONFIG_ZRAM=y/' $DEFCONFIG
