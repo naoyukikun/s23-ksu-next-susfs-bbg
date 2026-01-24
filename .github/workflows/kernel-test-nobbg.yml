@@ -92,11 +92,11 @@ jobs:
           
           # 3. Port LZ4 1.9.x (Fix for "404: Not Found" compiler error)
           # We use a reliable direct link to the Linux Mainline source
-          curl -LSs -f https://raw.githubusercontent.com/torvalds/linux/master/lib/lz4/lz4_decompress.c > lib/lz4/lz4_decompress.c || {
-            echo "LZ4 download failed, keeping stock version"
-            git checkout lib/lz4/lz4_decompress.c
-          }
-          sed -i 's/#include <linux\/unaligned.h>/#include <asm\/unaligned.h>/' lib/lz4/lz4_decompress.c
+          # curl -LSs -f https://raw.githubusercontent.com/torvalds/linux/master/lib/lz4/lz4_decompress.c > lib/lz4/lz4_decompress.c || {
+            # echo "LZ4 download failed, keeping stock version"
+            # git checkout lib/lz4/lz4_decompress.c
+          # }
+          # sed -i 's/#include <linux\/unaligned.h>/#include <asm\/unaligned.h>/' lib/lz4/lz4_decompress.c
 
           # 4. Modify gki_defconfig for optimizations
           DEFCONFIG="arch/arm64/configs/gki_defconfig"
@@ -109,8 +109,8 @@ jobs:
             echo "CONFIG_ZSTD_COMPRESS=y"
             echo "CONFIG_ZSTD_DECOMPRESS=y"
             # Optional: Disable Debugging for performance
-            # echo "CONFIG_SLUB_DEBUG=n"
-            # echo "CONFIG_DEBUG_MISC=n"
+            echo "CONFIG_SLUB_DEBUG=n"
+            echo "CONFIG_DEBUG_MISC=n"
           } >> $DEFCONFIG
           
           # Set ZRAM and ZSMALLOC to built-in (y)
