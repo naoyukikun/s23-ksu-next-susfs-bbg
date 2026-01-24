@@ -81,14 +81,13 @@ jobs:
           git config --global user.email "ishaqluqman656@gmail.com"
           git config --global user.name "naoyukikun"
           
-          # 2. Add LRNG from the specific 5.15.197 backport
+          # 2. Add LRNG (Linux Random Number Generator)
+          # We copy the source directly instead of patching to avoid format errors
           git clone --depth=1 -b master https://github.com/smuellerDD/lrng.git ../lrng_src
-          # We target the backports/v60-5.15.197 folder for your kernel version
-          # Using -3 (3-way merge) to handle minor line shifts
-          git am -3 ../lrng_src/backports/v60-5.15.197/*.patch || {
-            echo "Backport patches failed, attempting to skip duplicates"
-            git am --skip
-          }
+          cp -f ../lrng_src/*.c drivers/char/
+          cp -f ../lrng_src/*.h drivers/char/
+          # Update the build system to include LRNG
+          echo "obj-\$(CONFIG_LRNG) += lrng_interface_dev.o lrng_interface_random_kernel.o lrng_interface_random_user.o lrng_drng_chacha20.o lrng_es_mgr.o lrng_es_irq.o lrng_es_cpu.o lrng_es_jent.o lrng_health.o" >> drivers/char/Makefile
 
           
           # 3. Port LZ4 1.9.x (Fix for "404: Not Found" compiler error)
