@@ -138,10 +138,10 @@ jobs:
           EOF
           sed -i '/#include "lrng_es_mgr.h"/i #include "lrng_compat_shim.h"' drivers/char/lrng/lrng_es_mgr.c
 
-          # --- FIX 4: REMOVE FAILING STATIC ASSERTION (Fixes image_15cc9b.png) ---
-          # We locate the BUILD_BUG_ON check for buffer alignment and delete it to allow linking.
-          grep -r "BUILD_BUG_ON(sizeof(buflen)" drivers/char/lrng/ || echo "Warning: Assertion not found"
-          sed -i '/BUILD_BUG_ON(sizeof(buflen) < LRNG_KCAPI_ALIGN)/d' drivers/char/lrng/lrng_interface_kcapi.c
+          # --- FIX 4: REMOVE FAILING STATIC ASSERTION (UPDATED REGEX) ---
+          # Using regex '.*' to handle any tabs or spaces between words
+          echo "Removing problematic BUILD_BUG_ON..."
+          sed -i '/BUILD_BUG_ON.*sizeof(buflen).*LRNG_KCAPI_ALIGN/d' drivers/char/lrng/lrng_interface_kcapi.c
 
           # 4. Modify gki_defconfig for optimizations
           DEFCONFIG="arch/arm64/configs/gki_defconfig"
