@@ -176,21 +176,24 @@ jobs:
           sed -i '1i #define LZ4_FAST_DEC_LOOP 1' lib/lz4/lz4_decompress.c
 
           # ==========================================================
-          # PART C: BOEFFLA WAKELOCK BLOCKER (Fix: Download Header)
+          # PART C: BOEFFLA WAKELOCK BLOCKER (Final Fix)
           # ==========================================================
           echo "Injecting Boeffla Wakelock Blocker..."
           
-          # Base URL for the Boeffla driver files
-          BOEFFLA_BASE="https://raw.githubusercontent.com/qwerty12/SM-G9750_GrainGripper/master"
+          # Correct URL pointing to the 'drivers/base/power' folder where BOTH files live
+          BOEFFLA_RAW="https://raw.githubusercontent.com/qwerty12/SM-G9750_GrainGripper/master/drivers/base/power"
           
-          # 1. Download the Driver Source (.c) -> drivers/misc/
-          wget -O drivers/misc/boeffla_wl_blocker.c "$BOEFFLA_BASE/drivers/base/power/boeffla_wl_blocker.c"
+          # 1. Download Source (.c) -> drivers/misc/
+          wget -O drivers/misc/boeffla_wl_blocker.c "$BOEFFLA_RAW/boeffla_wl_blocker.c"
 
-          # 2. Download the Header File (.h) -> include/linux/ (CRITICAL FIX)
-          # The driver looks for this file. We put it in include/linux/ so it's globally available.
-          wget -O include/linux/boeffla_wl_blocker.h "$BOEFFLA_BASE/include/linux/boeffla_wl_blocker.h"
+          # 2. Download Header (.h) -> drivers/misc/ (AND include/linux/)
+          # We download it to drivers/misc first (because that's where the .c file is).
+          wget -O drivers/misc/boeffla_wl_blocker.h "$BOEFFLA_RAW/boeffla_wl_blocker.h"
+          
+          # We ALSO copy it to include/linux/ just in case the driver tries to include it via <...>
+          cp drivers/misc/boeffla_wl_blocker.h include/linux/boeffla_wl_blocker.h
 
-          # 3. Register in Kconfig (Inserts before the last 'endmenu')
+          # 3. Register in Kconfig
           sed -i '/endmenu/i \
           config BOEFFLA_WL_BLOCKER\
               bool "Boeffla Wakelock Blocker"\
