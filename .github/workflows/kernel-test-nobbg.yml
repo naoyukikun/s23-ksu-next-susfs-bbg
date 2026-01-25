@@ -143,6 +143,55 @@ jobs:
           # in ALL LRNG files. We replace it with '(void)', turning the check into a harmless no-op.
           echo "Neutralizing BUILD_BUG_ON in all LRNG files..."
           find drivers/char/lrng/ -name "*.c" -exec sed -i 's/BUILD_BUG_ON/(void)/g' {} +
+
+          # --- PART B: UPGRADE TO OFFICIAL LZ4 (Dev Branch) ---
+          echo "Upgrading to Official LZ4 (dev branch) with fast_dec_loop..."
+          
+          # Official LZ4 Dev Branch (Contains the latest fast_dec_loop)
+          # We use the 'dev' branch because 'master' is often outdated or missing on this repo.
+          OFFICIAL_URL="https://raw.githubusercontent.com/lz4/lz4/dev/lib"
+          
+          # 1. Download the unified lz4.c file to both kernel file names
+          # We download the SAME file to both places because official LZ4 is merged.
+          wget -O lib/lz4/lz4_compress.c "$OFFICIAL_URL/lz4.c"
+          wget -O lib/lz4/lz4_decompress.c "$OFFICIAL_URL/lz4.c"
+          wget -O lib/lz4/lz4hc_compress.c "$OFFICIAL_URL/lz4hc.c"
+          wget -O lib/lz4/lz4defs.h "$OFFICIAL_URL/lz4.h"
+          wget -O include/linux/lz4.h "$OFFICIAL_URL/lz4.h"
+
+          # 2. Kernel-ize the Headers
+          # Official LZ4 uses userspace headers (<stdlib.h>, <string.h>) which fail in kernel.
+          # We replace them with Kernel equivalents (<linux/slab.h>, <linux/string.h>).
+          echo "Patching headers for Kernel compatibility..."
+          find lib/lz4/ -name "*.c" -exec sed -i 's/#include <stdlib.h>/#include <linux\/kernel.h>\n#include <linux\/slab.h>/g' {} +
+          find lib/lz4/ -name "*.c" -exec sed -i 's/#include <string.h>/#include <linux\/string.h>/g' {} +
+          
+          # 3. PREVENT DUPLICATE SYMBOLS (Crucial Step)
+          # Since we downloaded lz4.c to *both* files, they both contain ALL functions.
+          # We must rename the unused functions in each file so the linker doesn't crash.
+          
+          # In lz4_decompress.c -> Rename compression functions to prevent collision
+          sed -i 's/LZ4_compress/LZ4_compress_DISABLED/g' lib/lz4/lz4_decompress.c
+          
+          # In lz4_compress.c -> Rename decompression functions to prevent collision
+          sed -i 's/LZ4_decompress/LZ4_decompress_DISABLED/g' lib/lz4/lz4_compress.c
+
+          # 4. Force Enable the Fast Decode Loop
+          # We insert the definition at the top of the decompress file to force it ON.
+          sed -i '1i #define LZ4_FAST_DEC_LOOP 1' lib/lz4/lz4_decompress.c
+
+          # 5. Fix Function Names for Kernel Calls
+          # The kernel expects lowercase names (lz4_compress) but official uses CamelCase (LZ4_compress).
+          # We map them back so the kernel can find them.
+          sed -i 's/LZ4_compress_default/lz4_compress/g' lib/lz4/lz4_compress.c
+          sed -i 's/LZ4_decompress_safe/lz4_decompress/g' lib/lz4/lz4_decompress.c
+
+          # Verification
+          if grep -q "LZ4_FAST_DEC_LOOP" lib/lz4/lz4_decompress.c; then
+            echo "✅ Success: LZ4 Dev Branch injected and Fast Loop enabled."
+          else
+            echo "❌ Error: Fast Loop check failed."
+          fi
           
           # 3. Modify gki_defconfig for optimizations
           DEFCONFIG="arch/arm64/configs/gki_defconfig"
@@ -168,11 +217,11 @@ jobs:
             echo "CONFIG_LRU_GEN_STATS=y"
 
             # ZRAM CONFIGURATION (The Safe Way)
-            #echo "CONFIG_ZRAM=m"
-            #echo "CONFIG_ZSMALLOC=m"
-            #echo "CONFIG_ZRAM_DEF_COMP_LZ4=y" 
-            #echo "CONFIG_LZ4_COMPRESS=y"
-            #echo "CONFIG_LZ4_DECOMPRESS=y"
+            echo "CONFIG_ZRAM=m"
+            echo "CONFIG_ZSMALLOC=m"
+            echo "CONFIG_ZRAM_DEF_COMP_LZ4=y" 
+            echo "CONFIG_LZ4_COMPRESS=y"
+            echo "CONFIG_LZ4_DECOMPRESS=y"
 
             # --- Tweak 5: Disable Debugging Overhead (Raw Performance) ---
             # Disabling SLUB_DEBUG reduces overhead for every memory allocation
