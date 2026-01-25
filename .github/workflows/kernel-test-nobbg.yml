@@ -147,6 +147,9 @@ jobs:
           # 3. Modify gki_defconfig for optimizations
           DEFCONFIG="arch/arm64/configs/gki_defconfig"
           {
+            echo "CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y"
+            echo "CONFIG_LRNG=y"
+            
             # 1. Unlock the Advanced TCP Menu
             echo "CONFIG_TCP_CONG_ADVANCED=y"
             
@@ -163,6 +166,13 @@ jobs:
             echo "CONFIG_LRU_GEN=y"
             echo "CONFIG_LRU_GEN_ENABLED=y"
             echo "CONFIG_LRU_GEN_STATS=y"
+
+            # ZRAM CONFIGURATION (The Safe Way)
+            #echo "CONFIG_ZRAM=m"
+            #echo "CONFIG_ZSMALLOC=m"
+            #echo "CONFIG_ZRAM_DEF_COMP_LZ4=y" 
+            #echo "CONFIG_LZ4_COMPRESS=y"
+            #echo "CONFIG_LZ4_DECOMPRESS=y"
 
             # --- Tweak 5: Disable Debugging Overhead (Raw Performance) ---
             # Disabling SLUB_DEBUG reduces overhead for every memory allocation
