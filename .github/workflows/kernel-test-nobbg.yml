@@ -241,6 +241,8 @@ jobs:
           
           # We replace the text string (This is the important part you were missing!)
           sed -i 's/CONFIG_DEFAULT_TCP_CONG="cubic"/CONFIG_DEFAULT_TCP_CONG="bbr"/' $DEFCONFIG
+
+          sed -i 's/CONFIG_ZRAM_DEF_COMP_LZO=y/CONFIG_ZRAM_DEF_COMP_LZ4=y/' $DEFCONFIG
           
           # Set ZRAM and ZSMALLOC to built-in (y)
           # sed -i 's/CONFIG_ZRAM=m/CONFIG_ZRAM=y/' $DEFCONFIG
