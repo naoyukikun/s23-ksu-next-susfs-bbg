@@ -42,7 +42,7 @@ jobs:
           | jq -r '.[0].name' | sed 's/^v//' | tr -d '.')" >> $GITHUB_ENV
 
           # Integrate the latest DEV version of KernelSU Next into the source
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s dev
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s dev_susfs
 
           # Compute version code = commit count + 10200 (same scheme as KernelSU CI)
           COMMITS="$(git -C "./KernelSU-Next" rev-list --count HEAD || echo 0)"
@@ -63,17 +63,11 @@ jobs:
           cd ..
 
           # Begin susfs patching
-          rsync -a ./susfs4ksu/kernel_patches/fs/ ./fs/
-          rsync -a ./susfs4ksu/kernel_patches/include/linux/ ./include/linux/
-
-
-          # Temp fix if don't find
-          if [ ! -f ./include/linux/susfs_def.h ]; then
-          curl -fL -o ./include/linux/susfs_def.h \
-          https://gitlab.com/simonpunk/susfs4ksu/-/raw/3c7ce6a308d93f33f06d528740eff0afcba31127/kernel_patches/include/linux/susfs_def.h
-          fi
-
-          patch -p1 --fuzz=3 < "${GITHUB_WORKSPACE}/rezoss_next3_susfs2.patch"
+          cp -rv ./susfs4ksu/kernel_patches/fs/* ./fs/
+          cp -rv ./susfs4ksu/kernel_patches/include/linux/* ./include/linux/
+          cp ./susfs4ksu/kernel_patches/50_add_susfs_in_gki-android13-5.15.patch ./
+          patch -p1 < ./50_add_susfs_in_gki-android13-5.15.patch
+          #patch -p1 --fuzz=3 < "${GITHUB_WORKSPACE}/rezoss_next3_susfs2.patch"
           
           # Integrate manual hook 1.6
           curl -L -o manual-hook.patch https://github.com/SukiSU-Ultra/SukiSU_patch/raw/83aa64b7548890bb1f2eff6c990c03a1802df27b/hooks/scope_min_manual_hooks_v1.6.patch
