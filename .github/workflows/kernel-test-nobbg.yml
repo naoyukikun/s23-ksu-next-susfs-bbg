@@ -80,17 +80,6 @@ jobs:
           # 1. Set Identity for patching
           git config --global user.email "ishaqluqman656@gmail.com"
           git config --global user.name "naoyukikun"
-
-          # --- FIX: RCU BOOST STALLS (Prevents UI Freezes) ---
-          # Uses the exact 5.15-stable backport hash (fcc9797...)
-          echo "Checking for RCU Boost Fix..."
-          if grep -q "rcu_boost_kthread_status" kernel/rcu/tree_plugin.h; then
-            echo "✅ RCU Boost logic is ALREADY present. Skipping."
-          else
-            echo "Applying RCU Boost Fix..."
-            curl -L "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/patch/?id=fcc9797d0d1323ca51d87f2dd7260c002fd1a2d2" -o rcu_boost.patch
-            patch -p1 --fuzz=3 < rcu_boost.patch || echo "⚠️ RCU Patch failed (Context mismatch?)"
-          fi
           
           # 2. Clone LRNG Repo
           git clone --depth=1 -b master https://github.com/smuellerDD/lrng.git ../lrng_src
