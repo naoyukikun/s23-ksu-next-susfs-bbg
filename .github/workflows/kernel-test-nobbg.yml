@@ -147,11 +147,16 @@ jobs:
           # 3. Modify gki_defconfig for optimizations
           DEFCONFIG="arch/arm64/configs/gki_defconfig"
           {
-            echo "CONFIG_LRNG=y"
-            echo "CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y"
-            # --- Tweak 3: Enable TCP BBR (Better Network Speed) ---
+            # 1. Unlock the Advanced TCP Menu
+            echo "CONFIG_TCP_CONG_ADVANCED=y"
+            
+            # 2. Enable Fair Queueing (REQUIRED for BBR)
+            echo "CONFIG_NET_SCH_FQ=y"
+            echo "CONFIG_DEFAULT_FQ=y"
+            
+            # 3. Enable BBR
             echo "CONFIG_TCP_CONG_BBR=y"
-            echo "CONFIG_DEFAULT_BBR=y" 
+            echo "CONFIG_DEFAULT_BBR=y"
             
             # --- Tweak 4: Enable MGLRU (Better Multitasking/RAM Management) ---
             # This is native to 5.15 and extremely stable
@@ -171,8 +176,12 @@ jobs:
             #echo "CONFIG_WIREGUARD=y"
           } >> $DEFCONFIG
           
-          # Force Default TCP to BBR
+          # 4. Use SED to REMOVE Cubic as the default and INSERT BBR
+          # We replace the boolean switch
           sed -i 's/CONFIG_DEFAULT_CUBIC=y/CONFIG_DEFAULT_BBR=y/' $DEFCONFIG
+          
+          # We replace the text string (This is the important part you were missing!)
+          sed -i 's/CONFIG_DEFAULT_TCP_CONG="cubic"/CONFIG_DEFAULT_TCP_CONG="bbr"/' $DEFCONFIG
           
           # Set ZRAM and ZSMALLOC to built-in (y)
           # sed -i 's/CONFIG_ZRAM=m/CONFIG_ZRAM=y/' $DEFCONFIG
