@@ -286,6 +286,8 @@ jobs:
             echo "CONFIG_RCU_BOOST_DELAY=500"
             echo "CONFIG_RCU_NOCB_CPU=y"
 
+            echo "CONFIG_AUDITSYSCALL=n"
+
             # --- Tweak 5: Disable Debugging Overhead (Raw Performance) ---
             # Disabling SLUB_DEBUG reduces overhead for every memory allocation
             #echo "CONFIG_SLUB_DEBUG=n"
