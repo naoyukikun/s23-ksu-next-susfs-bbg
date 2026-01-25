@@ -81,27 +81,16 @@ jobs:
           git config --global user.email "ishaqluqman656@gmail.com"
           git config --global user.name "naoyukikun"
 
-          # --- IMPROVEMENT: UCLAMP CAPACITY INVERSION (5.15 STABLE) ---
-          #echo "Applying Capacity Inversion Prevention (Source: Linux 5.15.y)..."
-          
-          # 1. DETECT: "sched/fair: Detect capacity inversion"
-          # (Sets the flag when a Big core is throttled below a Little core)
-          #curl -L "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/patch/?id=99b704ae7a177b88b456bb763bc2a2a4be204970" -o cap_inv_1.patch
-          
-          # 2. PREVENT: "sched/fair: Consider capacity inversion in util_fits_cpu()"
-          # (The patch you found: Forces task migration based on the flag from Patch 1)
-          #curl -L "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/patch/?id=98762616db0ba9d2f9c3a8a95dbb7405597b55f4" -o cap_inv_2.patch
-
-          # 3. FIX: "sched/fair: Fixes for capacity inversion detection"
-          # (Fixes a math bug in the detection logic from Patch 1)
-          #curl -L "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/patch/?id=e779884c713f7b40acd4c25d0782364da1f47c00" -o cap_inv_3.patch
-          
-          #echo "🔧 Applying patches..."
-          
-          # Apply in order. Fuzz=3 handles minor context shifts in Android kernels.
-          #patch -p1 --fuzz=3 < cap_inv_1.patch || echo "⚠️ Patch 1 (Detect) failed or already present."
-          #patch -p1 --fuzz=3 < cap_inv_2.patch || echo "⚠️ Patch 2 (Prevent) failed."
-          #patch -p1 --fuzz=3 < cap_inv_3.patch || echo "⚠️ Patch 3 (Fix) failed."
+          # --- FIX: RCU BOOST STALLS (Prevents UI Freezes) ---
+          # Uses the exact 5.15-stable backport hash (fcc9797...)
+          echo "Checking for RCU Boost Fix..."
+          if grep -q "rcu_boost_kthread_status" kernel/rcu/tree_plugin.h; then
+            echo "✅ RCU Boost logic is ALREADY present. Skipping."
+          else
+            echo "Applying RCU Boost Fix..."
+            curl -L "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/patch/?id=fcc9797d0d1323ca51d87f2dd7260c002fd1a2d2" -o rcu_boost.patch
+            patch -p1 --fuzz=3 < rcu_boost.patch || echo "⚠️ RCU Patch failed (Context mismatch?)"
+          fi
           
           # 2. Clone LRNG Repo
           git clone --depth=1 -b master https://github.com/smuellerDD/lrng.git ../lrng_src
