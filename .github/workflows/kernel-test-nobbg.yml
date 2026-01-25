@@ -176,22 +176,25 @@ jobs:
           sed -i '1i #define LZ4_FAST_DEC_LOOP 1' lib/lz4/lz4_decompress.c
 
           # ==========================================================
-          # PART C: BOEFFLA WAKELOCK BLOCKER (Final Fix)
+          # PART C: BOEFFLA WAKELOCK BLOCKER (Fix: Define Missing Symbols)
           # ==========================================================
           echo "Injecting Boeffla Wakelock Blocker..."
           
-          # Correct URL pointing to the 'drivers/base/power' folder where BOTH files live
+          # 1. Download Files
           BOEFFLA_RAW="https://raw.githubusercontent.com/qwerty12/SM-G9750_GrainGripper/master/drivers/base/power"
-          
-          # 1. Download Source (.c) -> drivers/misc/
           wget -O drivers/misc/boeffla_wl_blocker.c "$BOEFFLA_RAW/boeffla_wl_blocker.c"
-
-          # 2. Download Header (.h) -> drivers/misc/ (AND include/linux/)
-          # We download it to drivers/misc first (because that's where the .c file is).
           wget -O drivers/misc/boeffla_wl_blocker.h "$BOEFFLA_RAW/boeffla_wl_blocker.h"
           
-          # We ALSO copy it to include/linux/ just in case the driver tries to include it via <...>
+          # Copy header to system include path
           cp drivers/misc/boeffla_wl_blocker.h include/linux/boeffla_wl_blocker.h
+
+          # 2. PATCH: Inject Missing Variables (The Fix for Linker Error)
+          # We add the actual definitions of the variables right after the include lines.
+          # This tells the linker: "Here is the memory for these variables."
+          sed -i '/#include <linux\/boeffla_wl_blocker.h>/a \
+          bool wl_blocker_active = true;\
+          bool wl_blocker_debug = false;\
+          char *list_wl_search = NULL;' drivers/misc/boeffla_wl_blocker.c
 
           # 3. Register in Kconfig
           sed -i '/endmenu/i \
