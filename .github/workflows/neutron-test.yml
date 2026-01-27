@@ -12,20 +12,13 @@ jobs:
       - name: Checkout the repository
         uses: actions/checkout@v4 
 
-      - name: Set up Neutron Clang (High Performance)
+      - name: Install Dependencies
         run: |
           sudo apt update
-          sudo apt install -y lz4 liblz4-dev libssl-dev git curl zstd
-          
-          # Download Neutron Clang
-          mkdir -p clang
-          cd clang
-          curl -LO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
-          chmod +x antman
-          ./antman -S
-          
-          # Add to PATH
-          echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
+          sudo apt install -y lz4 liblz4-dev libssl-dev git curl zstd \
+          bc bison build-essential flex g++-multilib gcc-multilib gnupg \
+          lib32readline-dev lib32z1-dev libelf-dev liblz4-tool lzop zlib1g-dev \
+          pahole dwarves cpio zip python3 python-is-python3 tar perl jq
 
       - name: Clone source
         run: |
