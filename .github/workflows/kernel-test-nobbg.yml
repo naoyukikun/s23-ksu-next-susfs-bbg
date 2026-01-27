@@ -286,6 +286,13 @@ jobs:
           sed -i 's/CONFIG_DEFAULT_TCP_CONG="cubic"/CONFIG_DEFAULT_TCP_CONG="bbr"/' $DEFCONFIG
 
           sed -i 's/CONFIG_ZRAM_DEF_COMP_LZO=y/CONFIG_ZRAM_DEF_COMP_LZ4=y/' $DEFCONFIG
+
+          # 2. Force 300Hz & Tickless (Overwriting your defaults)
+          # Disable 250Hz
+          sed -i 's/CONFIG_HZ_250=y/# CONFIG_HZ_250 is not set/' $DEFCONFIG
+          sed -i 's/CONFIG_HZ=250/CONFIG_HZ=300/' $DEFCONFIG
+          # Enable 300Hz
+          echo "CONFIG_HZ_300=y" >> $DEFCONFIG
           
           # Set ZRAM and ZSMALLOC to built-in (y)
           # sed -i 's/CONFIG_ZRAM=m/CONFIG_ZRAM=y/' $DEFCONFIG
