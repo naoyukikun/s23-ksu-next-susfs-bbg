@@ -40,7 +40,7 @@ jobs:
           cd kernel
           
           # Integrate the builtin SukiSU 
-          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s builtin
+          curl -LSs "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU-Ultra/main/kernel/setup.sh" | bash -s main
 
           # Determine the tag of the latest release of SukiSU
           echo "SUKISU_VERSION=$(curl -s "https://api.github.com/repos/SukiSU-Ultra/SukiSU-Ultra/tags" \
@@ -67,9 +67,9 @@ jobs:
           cp -rv ./susfs4ksu/kernel_patches/include/linux/* include/linux/
           cp -rv ./susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./KernelSU/
           cp -rv ./susfs4ksu/kernel_patches/50_add_susfs_in_gki-android13-5.15.patch .
-          cd ./KernelSU && patch -p1 < 10_enable_susfs_for_ksu.patch
-          cd .. && patch -p1 < 50_add_susfs_in_gki-android13-5.15.patch
-          #patch -p1 --fuzz=3 < "${GITHUB_WORKSPACE}/rezoss_sukisu_susfs.patch"                
+          #cd ./KernelSU && patch -p1 < 10_enable_susfs_for_ksu.patch
+          #cd .. && patch -p1 < 50_add_susfs_in_gki-android13-5.15.patch
+          patch -p1 --fuzz=3 < "${GITHUB_WORKSPACE}/rezoss_sukisu_susfs.patch"                
 
           
                     
@@ -84,10 +84,10 @@ jobs:
           sed -i '/config KPM/{:a; n; s/^\s*default n/default y/; ta;}' KernelSU/kernel/Kconfig
           
           # Adding BBG support
-          #wget -O- https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
-          #echo "CONFIG_BBG=y" >> ./arch/arm64/configs/gki_defconfig
-          #sed -i 's/\(CONFIG_LSM="[^"]*\)"/\1,baseband_guard"/' ./arch/arm64/configs/gki_defconfig
-          #sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/lockdown/lockdown,baseband_guard/ } }' ./security/Kconfig
+          wget -O- https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
+          echo "CONFIG_BBG=y" >> ./arch/arm64/configs/gki_defconfig
+          sed -i 's/\(CONFIG_LSM="[^"]*\)"/\1,baseband_guard"/' ./arch/arm64/configs/gki_defconfig
+          sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/lockdown/lockdown,baseband_guard/ } }' ./security/Kconfig
           
 
       - name: Set up swap space
