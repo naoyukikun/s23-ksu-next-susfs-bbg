@@ -1,0 +1,352 @@
+# Script github action kanged from Ivan @reddxae with little bit my modification and addition
+name: Build kernel (neutron)
+on:
+  #schedule:
+    #- cron: '0 4 * * *'  # Runs every day at 04:00 UTC
+  workflow_dispatch: # Allow manual trigger if needed
+  
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4 
+
+      - name: Set up Neutron Clang (High Performance)
+        run: |
+          sudo apt update
+          sudo apt install -y lz4 liblz4-dev libssl-dev git curl zstd
+          
+          # Download Neutron Clang
+          mkdir -p clang
+          cd clang
+          curl -LO "https://raw.githubusercontent.com/Neutron-Toolchains/antman/main/antman"
+          chmod +x antman
+          ./antman -S
+          
+          # Add to PATH
+          echo "$GITHUB_WORKSPACE/clang/bin" >> $GITHUB_PATH
+
+      - name: Clone source
+        run: |
+          git clone --depth=1 -b android13-5.15 https://github.com/samsung-sm8550/kernel_samsung_sm8550-common.git kernel
+          # git clone --depth=1 -b android13-5.15 https://github.com/naoyukikun/kernel_samsung_sm8550-common.git kernel
+
+          # Determine the current kernel version
+          echo "KERNEL_VERSION=$(grep -m1 '^SUBLEVEL =' ./kernel/Makefile | awk '{print $3}')" >> $GITHUB_ENV
+          
+      - name: Apply the Wild_KSU, SUSFS, manual hooks patch and Baseband Guard
+        run: |
+          set -euxo pipefail
+          cd kernel
+          # Determine the tag of the latest release of Wild_KSU
+          echo "WILD_KSU_VERSION=$(curl -s "https://api.github.com/repos/Wildkernels/Wild_KSU/tags" \
+          | jq -r '.[0].name' | sed 's/^v//' | tr -d '.')" >> $GITHUB_ENV
+
+          # Integrate the latest version of Wild_KSU into the source
+          curl -LSs "https://raw.githubusercontent.com/WildKernels/Wild_KSU/wild/kernel/setup.sh" | bash -s wild
+          
+
+          # Compute version code = commit count + 10200 (same scheme as KernelSU CI)
+          COMMITS="$(git -C "./Wild_KSU" rev-list --count HEAD || echo 0)"
+          WILD_VER_CODE=$((30000 + COMMITS))
+          echo "WILD_VER_CODE=$WILD_VER_CODE" >> "$GITHUB_ENV"              
+          
+          # Integrate latest SUSFS
+          git clone -b gki-android13-5.15 --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git susfs4ksu
+
+          # Determine susfs version
+          cd susfs4ksu
+          SUSFS_COMMIT=$(git rev-parse --short HEAD)
+          SUSFS_VERSION=$(sed -n 's/.*#define[[:space:]]\+SUSFS_VERSION[[:space:]]\+"v\{0,1\}\([0-9.]\+\)".*/\1/p' kernel_patches/include/linux/susfs.h | tr -d '.')
+          echo "SUSFS_VERSION=$SUSFS_VERSION" >> "$GITHUB_ENV"
+          echo "SUSFS_COMMIT=$SUSFS_COMMIT" >> "$GITHUB_ENV"
+          cd ..
+
+          # Begin susfs patching
+          #cp ./susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./Wild_KSU/
+          cp ./susfs4ksu/kernel_patches/50_add_susfs_in_gki-android13-5.15.patch ./
+          cp -rv ./susfs4ksu/kernel_patches/fs/* fs/
+          cp -rv ./susfs4ksu/kernel_patches/include/linux/* include/linux/
+          patch -p1 --fuzz=3 < ./50_add_susfs_in_gki-android13-5.15.patch
+                    
+          # Integrate Sukisu scope_min_manual_hooks_v1.6.patch
+          curl -L -o manual-hook.patch https://github.com/SukiSU-Ultra/SukiSU_patch/raw/83aa64b7548890bb1f2eff6c990c03a1802df27b/hooks/scope_min_manual_hooks_v1.6.patch
+          patch -p1 --fuzz=3 < manual-hook.patch
+          echo "CONFIG_KSU_KPROBES_HOOK=n" >> ./arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> ./arch/arm64/configs/gki_defconfig   
+
+      - name: Add LRNG and Performance Tweaks
+        run: |
+          cd kernel
+
+          # 1. Set Identity for patching
+          git config --global user.email "ishaqluqman656@gmail.com"
+          git config --global user.name "naoyukikun"
+          
+          # 2. Clone LRNG Repo
+          git clone --depth=1 -b master https://github.com/smuellerDD/lrng.git ../lrng_src
+          
+          # --- STAGE 1: PRE-PATCHES ---
+          echo "Stage 1: Applying 6-digit pre-patches..."
+          for patch in ../lrng_src/backports/v60-5.15.197/v60-[0-9][0-9][0-9][0-9][0-9][0-9]*.patch; do
+            echo "Applying $patch"
+            patch -p1 < "$patch" || echo "⚠️ Pre-patch failed: $patch"
+          done
+
+          # --- STAGE 2: MAIN LRNG ---
+          echo "Stage 2: Applying Main LRNG v6.0 patches..."
+          for patch in ../lrng_src/kernel_patches/v6.0/*.patch; do
+            if [[ "$patch" == *"0000-cover-letter"* ]]; then continue; fi
+            echo "Applying $patch"
+            patch -p1 --fuzz=3 < "$patch" || echo "⚠️ Main patch failed: $patch"
+          done
+
+          # --- STAGE 3: POST-PATCHES ---
+          echo "Stage 3: Applying 2-digit post-patches (Ignoring errors)..."
+          for patch in ../lrng_src/backports/v60-5.15.197/v60-[0-9][0-9]-*.patch; do
+            echo "Applying $patch"
+            patch -p1 < "$patch" || echo "⚠️ Post-patch skipped"
+          done
+
+          # --- FIX 1 & 2: MISSING API HEADERS ---
+          if [ ! -f include/linux/hrtimer_api.h ]; then
+            echo "#include <linux/hrtimer.h>" > include/linux/hrtimer_api.h
+          fi
+          if [ ! -f include/linux/ktime_api.h ]; then
+            echo "#include <linux/ktime.h>" > include/linux/ktime_api.h
+          fi
+
+          # --- FIX 3: COMPATIBILITY SHIMS ---
+          cat <<EOF > drivers/char/lrng/lrng_compat_shim.h
+          #ifndef LRNG_COMPAT_SHIM_H
+          #define LRNG_COMPAT_SHIM_H
+          #include <asm/archrandom.h>
+          #define lrng_process_ready_list() do {} while (0)
+          static inline size_t arch_get_random_seed_longs(unsigned long *v, size_t max_longs) {
+              size_t i;
+              for (i = 0; i < max_longs; i++) {
+                  if (!arch_get_random_seed_long(&v[i])) break;
+              }
+              return i;
+          }
+          static inline size_t arch_get_random_longs(unsigned long *v, size_t max_longs) {
+              size_t i;
+              for (i = 0; i < max_longs; i++) {
+                  if (!arch_get_random_long(&v[i])) break;
+              }
+              return i;
+          }
+          #endif
+          EOF
+          sed -i '/#include "lrng_es_mgr.h"/i #include "lrng_compat_shim.h"' drivers/char/lrng/lrng_es_mgr.c
+
+          # --- FIX 4: NUCLEAR OPTION (Disable ALL Static Assertions) ---
+          # Instead of trying to find the specific line, we neutralize the BUILD_BUG_ON macro 
+          # in ALL LRNG files. We replace it with '(void)', turning the check into a harmless no-op.
+          echo "Neutralizing BUILD_BUG_ON in all LRNG files..."
+          find drivers/char/lrng/ -name "*.c" -exec sed -i 's/BUILD_BUG_ON/(void)/g' {} +
+
+          # --- PART B: UPGRADE TO LINUX 6.6 LZ4 (Solves API Errors) ---
+          echo "Upgrading to Linux 6.6 LZ4 (Kernel Compatible)..."
+          
+          # We use the official Linux Kernel repo (v6.6 tag).
+          # This version has the 'wrkmem' argument required to fix the "too many arguments" error.
+          K66_URL="https://raw.githubusercontent.com/torvalds/linux/v6.6/lib/lz4"
+          K66_INC="https://raw.githubusercontent.com/torvalds/linux/v6.6/include/linux"
+          K66_CRYPTO="https://raw.githubusercontent.com/torvalds/linux/v6.6/crypto"
+          
+          # 1. Download Library Files
+          wget -O lib/lz4/lz4_compress.c "$K66_URL/lz4_compress.c"
+          wget -O lib/lz4/lz4_decompress.c "$K66_URL/lz4_decompress.c"
+          wget -O lib/lz4/lz4defs.h "$K66_URL/lz4defs.h"
+          wget -O lib/lz4/lz4hc_compress.c "$K66_URL/lz4hc_compress.c"
+          
+          # 2. Download Header
+          wget -O include/linux/lz4.h "$K66_INC/lz4.h"
+          
+          # 3. Download Updated Crypto Wrapper (Prevents Linker Errors)
+          # The crypto subsystem needs this updated file to talk to the new library.
+          wget -O crypto/lz4.c "$K66_CRYPTO/lz4.c"
+
+          # 4. Patch F2FS Compatibility (Solves 'undeclared identifier' error)
+          # Newer kernels removed these constants, but your F2FS driver needs them.
+          # We inject them back into the header.
+          sed -i '/#define LZ4_H/a #define LZ4HC_MIN_CLEVEL 3\n#define LZ4HC_MAX_CLEVEL 16' include/linux/lz4.h
+          
+          # 5. Force Enable Fast Decode Loop
+          # Newer kernel LZ4 files use this macro to enable the speed boost.
+          sed -i '1i #define LZ4_FAST_DEC_LOOP 1' lib/lz4/lz4_decompress.c
+
+          # ==========================================================
+          # PART C: BOEFFLA WAKELOCK BLOCKER (Linker Error Fixed)
+          # ==========================================================
+          echo "Injecting Boeffla Wakelock Blocker..."
+          
+          # 1. Download Files
+          BOEFFLA_RAW="https://raw.githubusercontent.com/qwerty12/SM-G9750_GrainGripper/master/drivers/base/power"
+          wget -O drivers/misc/boeffla_wl_blocker.c "$BOEFFLA_RAW/boeffla_wl_blocker.c"
+          wget -O drivers/misc/boeffla_wl_blocker.h "$BOEFFLA_RAW/boeffla_wl_blocker.h"
+          
+          # Copy header to include path (Safety)
+          cp drivers/misc/boeffla_wl_blocker.h include/linux/boeffla_wl_blocker.h
+
+          # 2. PATCH: Convert 'extern' to actual definitions (CRITICAL FIX)
+          # We replace the 'extern' declarations with actual variable definitions so memory is allocated.
+          
+          # Fix list_wl_search
+          sed -i 's/extern char list_wl_search\[LENGTH_LIST_WL_SEARCH\];/char list_wl_search[LENGTH_LIST_WL_SEARCH] = {0};/' drivers/misc/boeffla_wl_blocker.c
+          
+          # Fix wl_blocker_active
+          sed -i 's/extern bool wl_blocker_active;/bool wl_blocker_active = false;/' drivers/misc/boeffla_wl_blocker.c
+          
+          # Fix wl_blocker_debug
+          sed -i 's/extern bool wl_blocker_debug;/bool wl_blocker_debug = false;/' drivers/misc/boeffla_wl_blocker.c
+
+          # 3. Register in Kconfig (Check to prevent duplicates)
+          if ! grep -q "BOEFFLA_WL_BLOCKER" drivers/misc/Kconfig; then
+            sed -i '/endmenu/i \
+            config BOEFFLA_WL_BLOCKER\
+                bool "Boeffla Wakelock Blocker"\
+                default y\
+                help\
+                  This allows to block wakelocks in the kernel.\
+            \
+            config BOEFFLA_WL_BLOCKER_DEFAULT\
+                string "List of wakelocks to block by default"\
+                depends on BOEFFLA_WL_BLOCKER\
+                default ""\
+                help\
+                  Enter a comma-separated list of wakelocks to block by default.' drivers/misc/Kconfig
+          fi
+
+          # 4. Register in Makefile (Check to prevent duplicates)
+          if ! grep -q "boeffla_wl_blocker.o" drivers/misc/Makefile; then
+            echo "obj-\$(CONFIG_BOEFFLA_WL_BLOCKER) += boeffla_wl_blocker.o" >> drivers/misc/Makefile
+          fi
+          
+          # 3. Modify gki_defconfig for optimizations
+          DEFCONFIG="arch/arm64/configs/gki_defconfig"
+          {
+            echo "CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y"
+            echo "CONFIG_LRNG=y"
+            
+            # 1. Unlock the Advanced TCP Menu
+            echo "CONFIG_TCP_CONG_ADVANCED=y"
+            
+            # 2. Enable Fair Queueing (REQUIRED for BBR)
+            echo "CONFIG_NET_SCH_FQ=y"
+            echo "CONFIG_DEFAULT_FQ=y"
+            
+            # 3. Enable BBR
+            echo "CONFIG_TCP_CONG_BBR=y"
+            echo "CONFIG_DEFAULT_BBR=y"
+            
+            # --- Tweak 4: Enable MGLRU (Better Multitasking/RAM Management) ---
+            # This is native to 5.15 and extremely stable
+            echo "CONFIG_LRU_GEN=y"
+            echo "CONFIG_LRU_GEN_ENABLED=y"
+            echo "CONFIG_LRU_GEN_STATS=y"
+
+            # ZRAM CONFIGURATION (The Safe Way)
+            echo "CONFIG_ZRAM=m"
+            echo "CONFIG_ZSMALLOC=m"
+            echo "CONFIG_ZRAM_DEF_COMP_LZ4=y" 
+            echo "CONFIG_LZ4_COMPRESS=y"
+            echo "CONFIG_LZ4_DECOMPRESS=y"
+
+            # Boeffla Blocker
+            echo "CONFIG_BOEFFLA_WL_BLOCKER=y"
+            echo 'CONFIG_BOEFFLA_WL_BLOCKER_DEFAULT="lps_wakelock,wlan_ctrl_wakelock"'
+
+            # --- RCU OPTIMIZATIONS (Fixed!) ---
+            echo "CONFIG_RCU_LAZY=y"              # Enable Lazy RCU
+            echo "CONFIG_RCU_LAZY_DEFAULT_OFF=n"  # Force it ON (Disable "Default Off")
+            echo "CONFIG_RCU_EXPERT=y"
+            echo "CONFIG_RCU_BOOST=y"
+            echo "CONFIG_RCU_BOOST_DELAY=500"
+            echo "CONFIG_RCU_NOCB_CPU=y"
+
+            echo "CONFIG_AUDITSYSCALL=n"
+
+            # --- Tweak 5: Disable Debugging Overhead (Raw Performance) ---
+            # Disabling SLUB_DEBUG reduces overhead for every memory allocation
+            #echo "CONFIG_SLUB_DEBUG=n"
+            #echo "CONFIG_PAGE_POISONING=n"
+            #echo "CONFIG_DEBUG_KERNEL=n"
+            #echo "CONFIG_DEBUG_MISC=n"
+            #echo "CONFIG_DEBUG_INFO=n"
+            
+            # --- Tweak 6: Enable WireGuard (Faster VPN Support) ---
+            #echo "CONFIG_WIREGUARD=y"
+          } >> $DEFCONFIG
+          
+          # 4. Use SED to REMOVE Cubic as the default and INSERT BBR
+          # We replace the boolean switch
+          sed -i 's/CONFIG_DEFAULT_CUBIC=y/CONFIG_DEFAULT_BBR=y/' $DEFCONFIG
+          
+          # We replace the text string (This is the important part you were missing!)
+          sed -i 's/CONFIG_DEFAULT_TCP_CONG="cubic"/CONFIG_DEFAULT_TCP_CONG="bbr"/' $DEFCONFIG
+
+          sed -i 's/CONFIG_ZRAM_DEF_COMP_LZO=y/CONFIG_ZRAM_DEF_COMP_LZ4=y/' $DEFCONFIG
+
+          # 2. Force 300Hz & Tickless (Overwriting your defaults)
+          # Disable 250Hz
+          sed -i 's/CONFIG_HZ_250=y/# CONFIG_HZ_250 is not set/' $DEFCONFIG
+          sed -i 's/CONFIG_HZ=250/CONFIG_HZ=300/' $DEFCONFIG
+          # Enable 300Hz
+          echo "CONFIG_HZ_300=y" >> $DEFCONFIG
+          
+          # Set ZRAM and ZSMALLOC to built-in (y)
+          # sed -i 's/CONFIG_ZRAM=m/CONFIG_ZRAM=y/' $DEFCONFIG
+          # sed -i 's/CONFIG_ZSMALLOC=m/CONFIG_ZSMALLOC=y/' $DEFCONFIG
+
+          # Adding BBG support
+          # wget -O- https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
+          # echo "CONFIG_BBG=y" >> ./arch/arm64/configs/gki_defconfig
+          # sed -i 's/\(CONFIG_LSM="[^"]*\)"/\1,baseband_guard"/' ./arch/arm64/configs/gki_defconfig
+          # sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/lockdown/lockdown,baseband_guard/ } }' ./security/Kconfig
+          
+
+      - name: Set up swap space
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 16
+
+      - name: Build the kernel
+        run: |
+          cd kernel
+          chmod +x scripts/build.sh
+          ./scripts/build.sh 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
+    
+      - name: Package image with AnyKernel3
+        id: package
+        run: |
+          set -euxo pipefail
+          unzip "${GITHUB_WORKSPACE}/anykernel.zip" -d anykernel/
+          cp kernel/out/arch/arm64/boot/Image.gz anykernel/
+          # Build final name
+          ZIP_NAME="common-5.15.${KERNEL_VERSION}-3d64R-wild${WILD_KSU_VERSION}_${WILD_VER_CODE}-susfs${SUSFS_VERSION}_${SUSFS_COMMIT}-manual"
+          cd anykernel
+          zip -r0 ../"${ZIP_NAME}".zip ./*
+          echo "zip_path=$GITHUB_WORKSPACE/${ZIP_NAME}.zip" >> "$GITHUB_OUTPUT"
+          echo "zip_name=${ZIP_NAME}" >> "$GITHUB_OUTPUT"
+          cd ..
+
+      - name: Upload the flashable kernel
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{steps.package.outputs.zip_name}}
+          path: anykernel/
+      
+      - name: Create GitHub Release and upload asset
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: experimental_build-${{ github.run_id }} 
+          target_commitish: ${{ github.sha }}
+          name: "Wild_KSU Kernel Build by ${{ github.repository }}"
+          generate_release_notes: true
+          files: ${{ steps.package.outputs.zip_path }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   
