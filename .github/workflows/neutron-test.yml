@@ -262,6 +262,13 @@ jobs:
 
             echo "CONFIG_AUDITSYSCALL=n"
 
+            # --- FORCE FULL LTO (High RAM Usage) ---
+            # 1. Disable Thin LTO (Critical step)
+            echo "CONFIG_LTO_CLANG_THIN=n"
+            
+            # 2. Enable Full LTO
+            echo "CONFIG_LTO_CLANG_FULL=y"
+
             # --- Tweak 5: Disable Debugging Overhead (Raw Performance) ---
             # Disabling SLUB_DEBUG reduces overhead for every memory allocation
             #echo "CONFIG_SLUB_DEBUG=n"
@@ -289,6 +296,10 @@ jobs:
           sed -i 's/CONFIG_HZ=250/CONFIG_HZ=300/' $DEFCONFIG
           # Enable 300Hz
           echo "CONFIG_HZ_300=y" >> $DEFCONFIG
+
+          # --- SAFETY FORCE REPLACEMENT ---
+          # Use sed to hunt down any pre-existing "Thin=y" and kill it
+          sed -i 's/CONFIG_LTO_CLANG_THIN=y/CONFIG_LTO_CLANG_THIN=n/' $DEFCONFIG
           
           # Set ZRAM and ZSMALLOC to built-in (y)
           # sed -i 's/CONFIG_ZRAM=m/CONFIG_ZRAM=y/' $DEFCONFIG
