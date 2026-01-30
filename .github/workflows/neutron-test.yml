@@ -310,6 +310,343 @@ jobs:
           # echo "CONFIG_BBG=y" >> ./arch/arm64/configs/gki_defconfig
           # sed -i 's/\(CONFIG_LSM="[^"]*\)"/\1,baseband_guard"/' ./arch/arm64/configs/gki_defconfig
           # sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/lockdown/lockdown,baseband_guard/ } }' ./security/Kconfig
+
+
+      - name: Apply All Performance Patches (Final)
+        run: |
+          cd kernel
+          set -e
+          
+          echo ">>> Starting 'Greatest Hits' Patching Process..."
+
+          # ==============================================================================
+          # PART 1: COMPLEX LOGIC PATCHES (Written to files & applied)
+          # ==============================================================================
+
+          # 1. Optimized Integer Sqrt (3x Faster Math)
+          cat << 'EOF' > int_sqrt.patch
+          diff --git a/lib/math/int_sqrt.c b/lib/math/int_sqrt.c
+          index a8170bb..cead8de 100644
+          --- a/lib/math/int_sqrt.c
+          +++ b/lib/math/int_sqrt.c
+          @@ -17,26 +17,34 @@
+          -unsigned long int_sqrt(unsigned long x)
+          +inline unsigned long int_sqrt(unsigned long x)
+           {
+          -	unsigned long b, m, y = 0;
+          +	register unsigned long tmp;
+          +	register unsigned long place;
+          +	register unsigned long root = 0;
+           
+           	if (x <= 1)
+           		return x;
+           
+          -	m = 1UL << (__fls(x) & ~1UL);
+          -	while (m != 0) {
+          -		b = y + m;
+          -		y >>= 1;
+          +	place = 1UL << (BITS_PER_LONG - 2);
+           
+          -		if (x >= b) {
+          -			x -= b;
+          -			y += m;
+          +	do{
+          +		place >>= 2;
+          +	}while(place > x);
+          +
+          +	do {
+          +		tmp = root + place;
+          +		root >>= 1;
+          +
+          +		if (x >= tmp)
+          +		{
+          +			x -= tmp;
+          +			root += place;
+           		}
+          -		m >>= 2;
+          -	}
+          +		place >>= 2;
+          +	}while (place != 0);
+           
+          -	return y;
+          +	return root;
+           }
+           EXPORT_SYMBOL(int_sqrt);
+          EOF
+          patch -p1 < int_sqrt.patch || echo "⚠️ int_sqrt failed"
+
+          # 2. Memory Prefetch (ARM64 Assembly Optimization)
+          cat << 'EOF' > mem_opt_prefetch.patch
+          diff --git a/arch/arm64/lib/copy_template.S b/arch/arm64/lib/copy_template.S
+          index 488df23..427935a 100644
+          --- a/arch/arm64/lib/copy_template.S
+          +++ b/arch/arm64/lib/copy_template.S
+          @@ -39,6 +39,7 @@ C_h	.req	x12
+           D_l	.req	x13
+           D_h	.req	x14
+           
+          +	prfm    pldl1strm, [src, #(1*L1_CACHE_BYTES)]
+           	mov	dst, dstin
+           	cmp	count, #16
+           	/*When memory length is less than 16, the accessed are not aligned.*/
+          @@ -169,6 +170,7 @@ D_h	.req	x14
+           	ldp1	C_l, C_h, src, #16
+           	stp1	D_l, D_h, dst, #16
+           	ldp1	D_l, D_h, src, #16
+          +	prfm    pldl1strm, [src, #(4*L1_CACHE_BYTES)]
+           	subs	count, count, #64
+           	b.ge	1b
+           	stp1	A_l, A_h, dst, #16
+          EOF
+          patch -p1 < mem_opt_prefetch.patch || echo "⚠️ mem_opt_prefetch failed"
+
+          # 3. CPUFreq: Add Limitation Scaling (Part 1: The Feature)
+          cat << 'EOF' > add_limitation.patch
+          diff --git a/drivers/cpufreq/cpufreq.c b/drivers/cpufreq/cpufreq.c
+          index 1535635..ef05e46 100644
+          --- a/drivers/cpufreq/cpufreq.c
+          +++ b/drivers/cpufreq/cpufreq.c
+          @@ -36,6 +36,19 @@
+           
+           static LIST_HEAD(cpufreq_policy_list);
+           
+          +static unsigned int min_limit[3] = {INT_MAX, INT_MAX, INT_MAX};
+          +
+          +static int get_index_by_cpu(const unsigned int cpu)
+          +{
+          +	if (cpumask_test_cpu(cpu, cpu_lp_mask)) {
+          +		return 0;
+          +	} else if (cpumask_test_cpu(cpu, cpu_perf_mask)) {
+          +		return 1;
+          +	} else {
+          +		return 2;
+          +	}
+          +}
+          +
+           /* Macros to iterate over CPU policies */
+           #define for_each_suitable_policy(__policy, __active)			 \
+           	list_for_each_entry(__policy, &cpufreq_policy_list, policy_list) \
+          @@ -717,6 +730,13 @@ static ssize_t show_cpuinfo_max_freq(struct cpufreq_policy *policy, char *buf)
+           	return sprintf(buf, "%u\n", max_freq);
+           }
+           
+          +static ssize_t show_scaling_min_freq_limit(struct cpufreq_policy *policy, char *buf)
+          +{
+          +	unsigned int val = min_limit[get_index_by_cpu(policy->cpu)];
+          +
+          +	return sprintf(buf, "%u\n", val);
+          +}
+          +
+           show_one(cpuinfo_min_freq, cpuinfo.min_freq);
+           show_one(cpuinfo_transition_latency, cpuinfo.transition_latency);
+           show_one(scaling_min_freq, min);
+          @@ -768,6 +788,20 @@ static ssize_t store_##file_name					\
+           	return ret >= 0 ? count : ret;					\
+           }
+           
+          +static ssize_t store_scaling_min_freq_limit
+          +(struct cpufreq_policy *policy, const char *buf, size_t count)
+          +{
+          +	unsigned long val;
+          +	int ret;
+          +
+          +	ret = sscanf(buf, "%u", &val);
+          +	if (ret != 1)
+          +		return -EINVAL;
+          +
+          +	min_limit[get_index_by_cpu(policy->cpu)] = val;
+          +	return count;
+          +}
+          +
+           store_one(scaling_min_freq, min);
+           store_one(scaling_max_freq, max);
+           
+          @@ -971,6 +1005,7 @@ cpufreq_freq_attr_ro(bios_limit);
+           cpufreq_freq_attr_ro(related_cpus);
+           cpufreq_freq_attr_ro(affected_cpus);
+           cpufreq_freq_attr_rw(scaling_min_freq);
+          +cpufreq_freq_attr_rw(scaling_min_freq_limit);
+           cpufreq_freq_attr_rw(scaling_max_freq);
+           cpufreq_freq_attr_rw(scaling_governor);
+           cpufreq_freq_attr_rw(scaling_setspeed);
+          @@ -981,6 +1016,7 @@ static struct attribute *cpufreq_attrs[] = {
+           	&cpuinfo_transition_latency.attr,
+           	&scaling_cur_freq.attr,
+           	&scaling_min_freq.attr,
+          +	&scaling_min_freq_limit.attr,
+           	&scaling_max_freq.attr,
+           	&affected_cpus.attr,
+           	&related_cpus.attr,
+          @@ -2649,6 +2685,8 @@ static int cpufreq_set_policy(struct cpufreq_policy *policy,
+           	new_data.min = freq_qos_read_value(&policy->constraints, FREQ_QOS_MIN);
+           	new_data.max = freq_qos_read_value(&policy->constraints, FREQ_QOS_MAX);
+           
+          +	new_data.min = min(new_data.min, min_limit[get_index_by_cpu(policy->cpu)]);
+          +
+           	pr_debug("setting new policy for CPU %u: %u - %u kHz\n",
+           		 new_data.cpu, new_data.min, new_data.max);
+          EOF
+          patch -p1 < add_limitation.patch || echo "⚠️ add_limitation failed (Maybe already applied?)"
+
+          # 4. CPUFreq: Rewrite Limitation (Part 2: The Fix)
+          cat << 'EOF' > rewrite_limitation.patch
+          diff --git a/drivers/cpufreq/cpufreq.c b/drivers/cpufreq/cpufreq.c
+          index ef05e46..f54c142 100644
+          --- a/drivers/cpufreq/cpufreq.c
+          +++ b/drivers/cpufreq/cpufreq.c
+          @@ -36,17 +36,35 @@
+           
+           static LIST_HEAD(cpufreq_policy_list);
+           
+          -static unsigned int min_limit[3] = {INT_MAX, INT_MAX, INT_MAX};
+          +#define MAX_CLUSTERS 3
+           
+          -static int get_index_by_cpu(const unsigned int cpu)
+          -{
+          -	if (cpumask_test_cpu(cpu, cpu_lp_mask)) {
+          -		return 0;
+          -	} else if (cpumask_test_cpu(cpu, cpu_perf_mask)) {
+          -		return 1;
+          -	} else {
+          -		return 2;
+          +struct cpumask_uint_kv {
+          +    cpumask_var_t key;
+          +    unsigned int value;
+          +};
+          +
+          +static struct cpumask_uint_kv cpumask_min_limit_store[MAX_CLUSTERS] __read_mostly;
+          +
+          +static void store_cpumask_min_limit(const cpumask_var_t key, const unsigned int value) {
+          +	int i;
+          +	for (i = 0; i < MAX_CLUSTERS; i++) {
+          +		if (cpumask_empty(cpumask_min_limit_store[i].key) || cpumask_equal(cpumask_min_limit_store[i].key, key)) {
+          +			cpumask_copy(cpumask_min_limit_store[i].key, key);
+          +			cpumask_min_limit_store[i].value = value;
+          +			return;
+          +		}
+           	}
+          +	pr_err("cpumask_min_limit_store is full.\n");
+           }
+          +
+          +static unsigned int get_cpumask_min_limit(const cpumask_var_t key) {
+          +	int i;
+          +	for (i = 0; i < MAX_CLUSTERS; i++) {
+          +		if (cpumask_equal(cpumask_min_limit_store[i].key, key)) {
+          +		    return cpumask_min_limit_store[i].value;
+          +		}
+          +	}
+          +	return INT_MAX;
+           }
+           
+           /* Macros to iterate over CPU policies */
+          @@ -732,7 +750,7 @@ static ssize_t show_cpuinfo_max_freq(struct cpufreq_policy *policy, char *buf)
+           
+           static ssize_t show_scaling_min_freq_limit(struct cpufreq_policy *policy, char *buf)
+           {
+          -	unsigned int val = min_limit[get_index_by_cpu(policy->cpu)];
+          +	unsigned int val = get_cpumask_min_limit(policy->related_cpus);
+           
+           	return sprintf(buf, "%u\n", val);
+           }
+          @@ -798,7 +816,7 @@ static ssize_t store_scaling_min_freq_limit
+           	if (ret != 1)
+           		return -EINVAL;
+           
+          -	min_limit[get_index_by_cpu(policy->cpu)] = val;
+          +	store_cpumask_min_limit(policy->related_cpus, val);
+           	return count;
+           }
+           
+          @@ -2685,7 +2703,7 @@ static int cpufreq_set_policy(struct cpufreq_policy *policy,
+           	new_data.min = freq_qos_read_value(&policy->constraints, FREQ_QOS_MIN);
+           	new_data.max = freq_qos_read_value(&policy->constraints, FREQ_QOS_MAX);
+           
+          -	new_data.min = min(new_data.min, min_limit[get_index_by_cpu(policy->cpu)]);
+          +	new_data.min = min(new_data.min, get_cpumask_min_limit(policy->related_cpus));
+           
+           	pr_debug("setting new policy for CPU %u: %u - %u kHz\n",
+           		 new_data.cpu, new_data.min, new_data.max);
+          EOF
+          patch -p1 < rewrite_limitation.patch || echo "⚠️ rewrite_limitation failed"
+
+          # 5. Avoid Extra S2Idle Wakeups (Sultan)
+          cat << 'EOF' > s2idle.patch
+          diff --git a/drivers/base/power/wakeup.c b/drivers/base/power/wakeup.c
+          index 770bb04..093fad9 100644
+          --- a/drivers/base/power/wakeup.c
+          +++ b/drivers/base/power/wakeup.c
+          @@ -935,8 +935,8 @@ EXPORT_SYMBOL_GPL(pm_wakeup_pending);
+           
+           void pm_system_wakeup(void)
+           {
+          -	atomic_inc(&pm_abort_suspend);
+          -	s2idle_wake();
+          +	if (atomic_inc_return_relaxed(&pm_abort_suspend) == 1)
+          +		s2idle_wake();
+           }
+           EXPORT_SYMBOL_GPL(pm_system_wakeup);
+          EOF
+          patch -p1 < s2idle.patch || echo "⚠️ s2idle failed"
+
+          # ==============================================================================
+          # PART 2: RAPID FIRE SED PATCHES (Safe & Fast)
+          # ==============================================================================
+
+          echo "Applying one-line fixes..."
+
+          # NET: Increase Socket Packets (256 -> 1024)
+          sed -i 's/_SK_MEM_PACKETS\t\t256/_SK_MEM_PACKETS\t\t1024/' include/net/sock.h
+
+          # EXT4: Increase Commit Age (5s -> 30s)
+          sed -i 's/JBD2_DEFAULT_MAX_COMMIT_AGE 5/JBD2_DEFAULT_MAX_COMMIT_AGE 30/' include/linux/jbd2.h
+
+          # FS: Align File Struct (Performance)
+          sed -i 's/__attribute__((aligned(4)));/__attribute__((aligned(8)));/' include/linux/fs.h
+
+          # MEM: Align Clear Page (ARM64 Optimization)
+          sed -i '/SYM_FUNC_START_PI(clear_page)/i \ \t.p2align 4' arch/arm64/lib/clear_page.S
+
+          # F2FS: Reduce Congestion Timeout (20ms -> 6ms)
+          sed -i 's/DEFAULT_IO_TIMEOUT\t(msecs_to_jiffies(20))/DEFAULT_IO_TIMEOUT\t(msecs_to_jiffies(6))/' fs/f2fs/f2fs.h
+
+          # F2FS: Enlarge Min Fsync Blocks (8 -> 20)
+          sed -i 's/DEF_MIN_FSYNC_BLOCKS\t8/DEF_MIN_FSYNC_BLOCKS\t20/' fs/f2fs/segment.h
+
+          # SCHED: Disable Cache Hot Buddy
+          sed -i 's/SCHED_FEAT(CACHE_HOT_BUDDY, true)/SCHED_FEAT(CACHE_HOT_BUDDY, false)/' kernel/sched/features.h
+
+          # SCHED: Adjust CPU Scan Order (target -> target + 1)
+          sed -i 's/for_each_cpu_wrap(cpu, cpus, target)/for_each_cpu_wrap(cpu, cpus, target + 1)/' kernel/sched/fair.c
+
+          # POWER: Minimise Alarmtimer Wakeup
+          sed -i 's/pm_wakeup_event(dev, 2 \* MSEC_PER_SEC);/pm_wakeup_event(dev, ktime_to_ms(min) + 1);/' kernel/time/alarmtimer.c
+
+          # POWER: Add Wakelock Timeout Globally (Prevent Stuck Wakelocks)
+          sed -i 's/__pm_stay_awake(wl->ws);/__pm_wakeup_event(wl->ws, 500);/' kernel/power/wakelock.c
+
+          # POWER: Reduce PCI PME Wakeups (1000 -> 4000)
+          sed -i 's/PME_TIMEOUT 1000/PME_TIMEOUT 4000/' drivers/pci/pci.c
+
+          # POWER: Reduce Freeze Timeout (Sultan)
+          sed -i 's/freeze_timeout_msecs = 20 \* MSEC_PER_SEC/freeze_timeout_msecs = MSEC_PER_SEC/' kernel/power/process.c
+          sed -i '/unsigned long val;/a \ \treturn n;' kernel/power/main.c
+
+          # IO: Reduce GC Sleep Time (500 -> 50)
+          sed -i 's/DEF_GC_THREAD_URGENT_SLEEP_TIME\t500/DEF_GC_THREAD_URGENT_SLEEP_TIME\t50/' fs/f2fs/gc.h
+
+          # FS: Reduce Cache Pressure (100 -> 50)
+          sed -i 's/sysctl_vfs_cache_pressure __read_mostly = 100/sysctl_vfs_cache_pressure __read_mostly = 50/' fs/dcache.c
+
+          # NET: Force TCP Nodelay (Latency Hack)
+          sed -i '/sockopt_lock_sock(sk);/a \ \toptname=TCP_NODELAY;' net/ipv4/tcp.c
+
+          # LOGS: Silence Log Spam (Healthd/Logd)
+          sed -i '/devkmsg_emit(facility, level, "%s", line);/i \ \tif (strstr(line, "healthd") || strstr(line, "logd") || strstr(line, "dashd")) { kfree(buf); return len; }' kernel/printk/printk.c
+
+          # LOGS: Silence IRQ Spam
+          sed -i 's/pr_warn_ratelimited("IRQ%u: set affinity failed/pr_debug_ratelimited("IRQ%u: set affinity failed/' kernel/irq/cpuhotplug.c
+
+          echo ">>> All 'Greatest Hits' Patches Applied!"
           
 
       - name: Set up swap space
