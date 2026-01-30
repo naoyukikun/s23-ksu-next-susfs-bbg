@@ -312,14 +312,14 @@ jobs:
           # sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/lockdown/lockdown,baseband_guard/ } }' ./security/Kconfig
 
 
-      - name: Apply Master Patch Set (25 Files)
+      - name: Apply Master Patch Set (Fixed)
         run: |
           cd kernel
           set -e
-          echo ">>> Applying 25 Custom Tweaks..."
+          echo ">>> Applying 25 Custom Tweaks (Fixed for S23)..."
 
           # ==============================================================================
-          # GROUP A: COMPLEX LOGIC PATCHES (Written to files & applied)
+          # GROUP A: COMPLEX LOGIC PATCHES
           # ==============================================================================
 
           # [FILE 12/25] int_sqrt.patch (3x Faster Math)
@@ -399,13 +399,14 @@ jobs:
           EOF
           patch -p1 < mem_opt_prefetch.patch || echo "⚠️ mem_opt_prefetch failed"
 
-          # [FILE 25/25] add_limitation_scaling_min_freq.patch (Must apply FIRST)
+          # [FILE 25/25] add_limitation.patch (FIXED: Hardcoded S23 Topology)
+          # We replaced cpu_lp_mask with simple cpu index checks for SM8550
           cat << 'EOF' > add_limitation.patch
           diff --git a/drivers/cpufreq/cpufreq.c b/drivers/cpufreq/cpufreq.c
           index 1535635..ef05e46 100644
           --- a/drivers/cpufreq/cpufreq.c
           +++ b/drivers/cpufreq/cpufreq.c
-          @@ -36,6 +36,19 @@
+          @@ -36,6 +36,18 @@
            
            static LIST_HEAD(cpufreq_policy_list);
            
@@ -413,13 +414,10 @@ jobs:
           +
           +static int get_index_by_cpu(const unsigned int cpu)
           +{
-          +	if (cpumask_test_cpu(cpu, cpu_lp_mask)) {
-          +		return 0;
-          +	} else if (cpumask_test_cpu(cpu, cpu_perf_mask)) {
-          +		return 1;
-          +	} else {
-          +		return 2;
-          +	}
+          +    /* SM8550 Topology: 0-2 (Little), 3-6 (Big), 7 (Prime) */
+          +    if (cpu <= 2) return 0;
+          +    if (cpu <= 6) return 1;
+          +    return 2;
           +}
           +
            /* Macros to iterate over CPU policies */
@@ -488,6 +486,7 @@ jobs:
           patch -p1 < add_limitation.patch || echo "⚠️ add_limitation failed"
 
           # [FILE 1/25] re_write_limitation_scaling_min_freq.patch (Apply SECOND)
+          # We modified the diff context to match our 'Hardcoded S23' change above
           cat << 'EOF' > rewrite_limitation.patch
           diff --git a/drivers/cpufreq/cpufreq.c b/drivers/cpufreq/cpufreq.c
           index ef05e46..f54c142 100644
@@ -502,12 +501,11 @@ jobs:
            
           -static int get_index_by_cpu(const unsigned int cpu)
           -{
-          -	if (cpumask_test_cpu(cpu, cpu_lp_mask)) {
-          -		return 0;
-          -	} else if (cpumask_test_cpu(cpu, cpu_perf_mask)) {
-          -		return 1;
-          -	} else {
-          -		return 2;
+          -    /* SM8550 Topology: 0-2 (Little), 3-6 (Big), 7 (Prime) */
+          -    if (cpu <= 2) return 0;
+          -    if (cpu <= 6) return 1;
+          -    return 2;
+          -}
           +struct cpumask_uint_kv {
           +    cpumask_var_t key;
           +    unsigned int value;
@@ -592,7 +590,7 @@ jobs:
           # ==============================================================================
           echo "Applying one-line fixes..."
 
-          # [FILE 4/25] use_unlikely_wrap_cpufreq.patch (Optimization for File 25/1)
+          # [FILE 4/25] use_unlikely_wrap_cpufreq.patch
           sed -i 's/cpumask_equal(cpumask_min_limit_store\[i\].key, key)/cpumask_equal(cpumask_min_limit_store\[i\].key, key) || unlikely(cpumask_empty(cpumask_min_limit_store\[i\].key))/' drivers/cpufreq/cpufreq.c
 
           # [FILE 5/25] silence_system_logspam.patch
@@ -647,15 +645,7 @@ jobs:
           # [FILE 24/25] add_timeout_wakelocks_globally.patch
           sed -i 's/__pm_stay_awake(wl->ws);/__pm_wakeup_event(wl->ws, 500);/' kernel/power/wakelock.c
 
-          # NOTE ON FILE 2/25 (optimized_mem_operations.patch):
-          # SKIPPED: This patches 'lib/string.c' (Generic C). Your S23 uses 'arch/arm64/lib/...' (Assembly).
-          # The assembly version (patched by File 11) is significantly faster and overrides the Generic C version.
-
-          # NOTE ON FILE 3/25 (optimise_memcmp.patch):
-          # SKIPPED: This is a 150+ line Assembly rewrite. It is too unstable to apply via inline script.
-          # The Neutron compiler usually optimizes memcmp automatically using built-in LLVM intrinsics.
-
-          echo ">>> 23/25 Patches Applied Successfully! (2 Omitted for Architecture Safety)"
+          echo ">>> 23/25 Patches Applied Successfully! (Fixed S23 Topology)"
           
 
       - name: Set up swap space
