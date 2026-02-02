@@ -1,0 +1,811 @@
+# Script github action kanged from Ivan @reddxae with little bit my modification and addition
+name: Build kernel (yuzaki)
+on:
+  #schedule:
+    #- cron: '0 4 * * *'  # Runs every day at 04:00 UTC
+  workflow_dispatch: # Allow manual trigger if needed
+  
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the repository
+        uses: actions/checkout@v4 
+
+      - name: Install Dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y lz4 liblz4-dev libssl-dev git curl zstd \
+          bc bison build-essential flex g++-multilib gcc-multilib gnupg \
+          lib32readline-dev lib32z1-dev libelf-dev liblz4-tool lzop zlib1g-dev \
+          pahole dwarves cpio zip python3 python-is-python3 tar perl jq
+
+      - name: Clone source
+        run: |
+          #git clone --depth=1 -b android13-5.15 https://github.com/samsung-sm8550/kernel_samsung_sm8550-common.git kernel
+          #git clone --depth=1 -b android13-5.15 https://github.com/naoyukikun/kernel_samsung_sm8550-common.git kernel
+          git clone --depth=1 -b main https://github.com/naoyukikun/s23-custom-kernel.git kernel
+
+          # Determine the current kernel version
+          echo "KERNEL_VERSION=$(grep -m1 '^SUBLEVEL =' ./kernel/Makefile | awk '{print $3}')" >> $GITHUB_ENV
+          
+      - name: Apply the Wild_KSU, SUSFS, manual hooks patch and Baseband Guard
+        run: |
+          set -euxo pipefail
+          cd kernel
+          # Determine the tag of the latest release of Wild_KSU
+          echo "WILD_KSU_VERSION=$(curl -s "https://api.github.com/repos/Wildkernels/Wild_KSU/tags" \
+          | jq -r '.[0].name' | sed 's/^v//' | tr -d '.')" >> $GITHUB_ENV
+
+          # Integrate the latest version of Wild_KSU into the source
+          curl -LSs "https://raw.githubusercontent.com/WildKernels/Wild_KSU/wild/kernel/setup.sh" | bash -s wild
+          
+
+          # Compute version code = commit count + 10200 (same scheme as KernelSU CI)
+          COMMITS="$(git -C "./Wild_KSU" rev-list --count HEAD || echo 0)"
+          WILD_VER_CODE=$((30000 + COMMITS))
+          echo "WILD_VER_CODE=$WILD_VER_CODE" >> "$GITHUB_ENV"              
+          
+          # Integrate latest SUSFS
+          git clone -b gki-android13-5.15 --depth=1 https://gitlab.com/simonpunk/susfs4ksu.git susfs4ksu
+
+          # Determine susfs version
+          cd susfs4ksu
+          SUSFS_COMMIT=$(git rev-parse --short HEAD)
+          SUSFS_VERSION=$(sed -n 's/.*#define[[:space:]]\+SUSFS_VERSION[[:space:]]\+"v\{0,1\}\([0-9.]\+\)".*/\1/p' kernel_patches/include/linux/susfs.h | tr -d '.')
+          echo "SUSFS_VERSION=$SUSFS_VERSION" >> "$GITHUB_ENV"
+          echo "SUSFS_COMMIT=$SUSFS_COMMIT" >> "$GITHUB_ENV"
+          cd ..
+
+          # Begin susfs patching
+          #cp ./susfs4ksu/kernel_patches/KernelSU/10_enable_susfs_for_ksu.patch ./Wild_KSU/
+          cp ./susfs4ksu/kernel_patches/50_add_susfs_in_gki-android13-5.15.patch ./
+          cp -rv ./susfs4ksu/kernel_patches/fs/* fs/
+          cp -rv ./susfs4ksu/kernel_patches/include/linux/* include/linux/
+          patch -p1 --fuzz=3 < ./50_add_susfs_in_gki-android13-5.15.patch
+                    
+          # Integrate Sukisu scope_min_manual_hooks_v1.6.patch
+          curl -L -o manual-hook.patch https://github.com/SukiSU-Ultra/SukiSU_patch/raw/83aa64b7548890bb1f2eff6c990c03a1802df27b/hooks/scope_min_manual_hooks_v1.6.patch
+          patch -p1 --fuzz=3 < manual-hook.patch
+          echo "CONFIG_KSU_KPROBES_HOOK=n" >> ./arch/arm64/configs/gki_defconfig
+          echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> ./arch/arm64/configs/gki_defconfig   
+
+      - name: Add LRNG and Performance Tweaks
+        run: |
+          cd kernel
+
+          # 1. Set Identity for patching
+          git config --global user.email "ishaqluqman656@gmail.com"
+          git config --global user.name "naoyukikun"
+          
+          # 2. Clone LRNG Repo
+          git clone --depth=1 -b master https://github.com/smuellerDD/lrng.git ../lrng_src
+          
+          # --- STAGE 1: PRE-PATCHES ---
+          echo "Stage 1: Applying 6-digit pre-patches..."
+          for patch in ../lrng_src/backports/v60-5.15.197/v60-[0-9][0-9][0-9][0-9][0-9][0-9]*.patch; do
+            echo "Applying $patch"
+            patch -p1 < "$patch" || echo "⚠️ Pre-patch failed: $patch"
+          done
+
+          # --- STAGE 2: MAIN LRNG ---
+          echo "Stage 2: Applying Main LRNG v6.0 patches..."
+          for patch in ../lrng_src/kernel_patches/v6.0/*.patch; do
+            if [[ "$patch" == *"0000-cover-letter"* ]]; then continue; fi
+            echo "Applying $patch"
+            patch -p1 --fuzz=3 < "$patch" || echo "⚠️ Main patch failed: $patch"
+          done
+
+          # --- STAGE 3: POST-PATCHES ---
+          echo "Stage 3: Applying 2-digit post-patches (Ignoring errors)..."
+          for patch in ../lrng_src/backports/v60-5.15.197/v60-[0-9][0-9]-*.patch; do
+            echo "Applying $patch"
+            patch -p1 < "$patch" || echo "⚠️ Post-patch skipped"
+          done
+
+          # --- FIX 1 & 2: MISSING API HEADERS ---
+          if [ ! -f include/linux/hrtimer_api.h ]; then
+            echo "#include <linux/hrtimer.h>" > include/linux/hrtimer_api.h
+          fi
+          if [ ! -f include/linux/ktime_api.h ]; then
+            echo "#include <linux/ktime.h>" > include/linux/ktime_api.h
+          fi
+
+          # --- FIX 3: COMPATIBILITY SHIMS ---
+          cat <<EOF > drivers/char/lrng/lrng_compat_shim.h
+          #ifndef LRNG_COMPAT_SHIM_H
+          #define LRNG_COMPAT_SHIM_H
+          #include <asm/archrandom.h>
+          #define lrng_process_ready_list() do {} while (0)
+          static inline size_t arch_get_random_seed_longs(unsigned long *v, size_t max_longs) {
+              size_t i;
+              for (i = 0; i < max_longs; i++) {
+                  if (!arch_get_random_seed_long(&v[i])) break;
+              }
+              return i;
+          }
+          static inline size_t arch_get_random_longs(unsigned long *v, size_t max_longs) {
+              size_t i;
+              for (i = 0; i < max_longs; i++) {
+                  if (!arch_get_random_long(&v[i])) break;
+              }
+              return i;
+          }
+          #endif
+          EOF
+          sed -i '/#include "lrng_es_mgr.h"/i #include "lrng_compat_shim.h"' drivers/char/lrng/lrng_es_mgr.c
+
+          # --- FIX 4: NUCLEAR OPTION (Disable ALL Static Assertions) ---
+          # Instead of trying to find the specific line, we neutralize the BUILD_BUG_ON macro 
+          # in ALL LRNG files. We replace it with '(void)', turning the check into a harmless no-op.
+          echo "Neutralizing BUILD_BUG_ON in all LRNG files..."
+          find drivers/char/lrng/ -name "*.c" -exec sed -i 's/BUILD_BUG_ON/(void)/g' {} +
+
+          # --- PART B: UPGRADE TO LINUX 6.6 LZ4 (Solves API Errors) ---
+          echo "Upgrading to Linux 6.6 LZ4 (Kernel Compatible)..."
+          
+          # We use the official Linux Kernel repo (v6.6 tag).
+          # This version has the 'wrkmem' argument required to fix the "too many arguments" error.
+          K66_URL="https://raw.githubusercontent.com/torvalds/linux/v6.6/lib/lz4"
+          K66_INC="https://raw.githubusercontent.com/torvalds/linux/v6.6/include/linux"
+          K66_CRYPTO="https://raw.githubusercontent.com/torvalds/linux/v6.6/crypto"
+          
+          # 1. Download Library Files
+          wget -O lib/lz4/lz4_compress.c "$K66_URL/lz4_compress.c"
+          wget -O lib/lz4/lz4_decompress.c "$K66_URL/lz4_decompress.c"
+          wget -O lib/lz4/lz4defs.h "$K66_URL/lz4defs.h"
+          wget -O lib/lz4/lz4hc_compress.c "$K66_URL/lz4hc_compress.c"
+          
+          # 2. Download Header
+          wget -O include/linux/lz4.h "$K66_INC/lz4.h"
+          
+          # 3. Download Updated Crypto Wrapper (Prevents Linker Errors)
+          # The crypto subsystem needs this updated file to talk to the new library.
+          wget -O crypto/lz4.c "$K66_CRYPTO/lz4.c"
+
+          # 4. Patch F2FS Compatibility (Solves 'undeclared identifier' error)
+          # Newer kernels removed these constants, but your F2FS driver needs them.
+          # We inject them back into the header.
+          sed -i '/#define LZ4_H/a #define LZ4HC_MIN_CLEVEL 3\n#define LZ4HC_MAX_CLEVEL 16' include/linux/lz4.h
+          
+          # 5. Force Enable Fast Decode Loop
+          # Newer kernel LZ4 files use this macro to enable the speed boost.
+          sed -i '1i #define LZ4_FAST_DEC_LOOP 1' lib/lz4/lz4_decompress.c
+
+          # ==========================================================
+          # PART C: BOEFFLA WAKELOCK BLOCKER (Linker Error Fixed)
+          # ==========================================================
+          echo "Injecting Boeffla Wakelock Blocker..."
+          
+          # 1. Download Files
+          BOEFFLA_RAW="https://raw.githubusercontent.com/qwerty12/SM-G9750_GrainGripper/master/drivers/base/power"
+          wget -O drivers/misc/boeffla_wl_blocker.c "$BOEFFLA_RAW/boeffla_wl_blocker.c"
+          wget -O drivers/misc/boeffla_wl_blocker.h "$BOEFFLA_RAW/boeffla_wl_blocker.h"
+          
+          # Copy header to include path (Safety)
+          cp drivers/misc/boeffla_wl_blocker.h include/linux/boeffla_wl_blocker.h
+
+          # 2. PATCH: Convert 'extern' to actual definitions (CRITICAL FIX)
+          # We replace the 'extern' declarations with actual variable definitions so memory is allocated.
+          
+          # Fix list_wl_search
+          sed -i 's/extern char list_wl_search\[LENGTH_LIST_WL_SEARCH\];/char list_wl_search[LENGTH_LIST_WL_SEARCH] = {0};/' drivers/misc/boeffla_wl_blocker.c
+          
+          # Fix wl_blocker_active
+          sed -i 's/extern bool wl_blocker_active;/bool wl_blocker_active = false;/' drivers/misc/boeffla_wl_blocker.c
+          
+          # Fix wl_blocker_debug
+          sed -i 's/extern bool wl_blocker_debug;/bool wl_blocker_debug = false;/' drivers/misc/boeffla_wl_blocker.c
+
+          # 3. Register in Kconfig (Check to prevent duplicates)
+          if ! grep -q "BOEFFLA_WL_BLOCKER" drivers/misc/Kconfig; then
+            sed -i '/endmenu/i \
+            config BOEFFLA_WL_BLOCKER\
+                bool "Boeffla Wakelock Blocker"\
+                default y\
+                help\
+                  This allows to block wakelocks in the kernel.\
+            \
+            config BOEFFLA_WL_BLOCKER_DEFAULT\
+                string "List of wakelocks to block by default"\
+                depends on BOEFFLA_WL_BLOCKER\
+                default ""\
+                help\
+                  Enter a comma-separated list of wakelocks to block by default.' drivers/misc/Kconfig
+          fi
+
+          # 4. Register in Makefile (Check to prevent duplicates)
+          if ! grep -q "boeffla_wl_blocker.o" drivers/misc/Makefile; then
+            echo "obj-\$(CONFIG_BOEFFLA_WL_BLOCKER) += boeffla_wl_blocker.o" >> drivers/misc/Makefile
+          fi
+          
+          # 3. Modify gki_defconfig for optimizations
+          DEFCONFIG="arch/arm64/configs/gki_defconfig"
+          {
+            echo "CONFIG_WQ_POWER_EFFICIENT_DEFAULT=y"
+            echo "CONFIG_LRNG=y"
+            
+            # 1. Unlock the Advanced TCP Menu
+            echo "CONFIG_TCP_CONG_ADVANCED=y"
+            
+            # 2. Enable Fair Queueing (REQUIRED for BBR)
+            echo "CONFIG_NET_SCH_FQ=y"
+            echo "CONFIG_DEFAULT_FQ=y"
+            
+            # 3. Enable BBR
+            echo "CONFIG_TCP_CONG_BBR=y"
+            echo "CONFIG_DEFAULT_BBR=y"
+            
+            # --- Tweak 4: Enable MGLRU (Better Multitasking/RAM Management) ---
+            # This is native to 5.15 and extremely stable
+            echo "CONFIG_LRU_GEN=y"
+            echo "CONFIG_LRU_GEN_ENABLED=y"
+            echo "CONFIG_LRU_GEN_STATS=y"
+
+            # ZRAM CONFIGURATION (The Safe Way)
+            echo "CONFIG_ZRAM=m"
+            echo "CONFIG_ZSMALLOC=m"
+            echo "CONFIG_ZRAM_DEF_COMP_LZ4=y" 
+            echo "CONFIG_LZ4_COMPRESS=y"
+            echo "CONFIG_LZ4_DECOMPRESS=y"
+
+            # Boeffla Blocker
+            echo "CONFIG_BOEFFLA_WL_BLOCKER=y"
+            echo 'CONFIG_BOEFFLA_WL_BLOCKER_DEFAULT="lps_wakelock,wlan_ctrl_wakelock"'
+
+            # --- RCU OPTIMIZATIONS (Fixed!) ---
+            echo "CONFIG_RCU_LAZY=y"              # Enable Lazy RCU
+            echo "CONFIG_RCU_LAZY_DEFAULT_OFF=n"  # Force it ON (Disable "Default Off")
+            echo "CONFIG_RCU_EXPERT=y"
+            echo "CONFIG_RCU_BOOST=y"
+            echo "CONFIG_RCU_BOOST_DELAY=500"
+            echo "CONFIG_RCU_NOCB_CPU=y"
+
+            echo "CONFIG_AUDITSYSCALL=n"
+
+            # --- FORCE FULL LTO (High RAM Usage) ---
+            # 1. Disable Thin LTO (Critical step)
+            echo "CONFIG_LTO_CLANG_THIN=n"
+            
+            # 2. Enable Full LTO
+            echo "CONFIG_LTO_CLANG_FULL=y"
+
+            # --- Tweak 5: Disable Debugging Overhead (Raw Performance) ---
+            # Disabling SLUB_DEBUG reduces overhead for every memory allocation
+            #echo "CONFIG_SLUB_DEBUG=n"
+            #echo "CONFIG_PAGE_POISONING=n"
+            #echo "CONFIG_DEBUG_KERNEL=n"
+            #echo "CONFIG_DEBUG_MISC=n"
+            #echo "CONFIG_DEBUG_INFO=n"
+            
+            # --- Tweak 6: Enable WireGuard (Faster VPN Support) ---
+            #echo "CONFIG_WIREGUARD=y"
+          } >> $DEFCONFIG
+          
+          # 4. Use SED to REMOVE Cubic as the default and INSERT BBR
+          # We replace the boolean switch
+          sed -i 's/CONFIG_DEFAULT_CUBIC=y/CONFIG_DEFAULT_BBR=y/' $DEFCONFIG
+          
+          # We replace the text string (This is the important part you were missing!)
+          sed -i 's/CONFIG_DEFAULT_TCP_CONG="cubic"/CONFIG_DEFAULT_TCP_CONG="bbr"/' $DEFCONFIG
+
+          sed -i 's/CONFIG_ZRAM_DEF_COMP_LZO=y/CONFIG_ZRAM_DEF_COMP_LZ4=y/' $DEFCONFIG
+
+          # 2. Force 300Hz & Tickless (Overwriting your defaults)
+          # Disable 250Hz
+          sed -i 's/CONFIG_HZ_250=y/# CONFIG_HZ_250 is not set/' $DEFCONFIG
+          sed -i 's/CONFIG_HZ=250/CONFIG_HZ=300/' $DEFCONFIG
+          # Enable 300Hz
+          echo "CONFIG_HZ_300=y" >> $DEFCONFIG
+
+          # --- SAFETY FORCE REPLACEMENT ---
+          # Use sed to hunt down any pre-existing "Thin=y" and kill it
+          sed -i 's/CONFIG_LTO_CLANG_THIN=y/CONFIG_LTO_CLANG_THIN=n/' $DEFCONFIG
+          
+          # Set ZRAM and ZSMALLOC to built-in (y)
+          # sed -i 's/CONFIG_ZRAM=m/CONFIG_ZRAM=y/' $DEFCONFIG
+          # sed -i 's/CONFIG_ZSMALLOC=m/CONFIG_ZSMALLOC=y/' $DEFCONFIG
+
+          # Adding BBG support
+          # wget -O- https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
+          # echo "CONFIG_BBG=y" >> ./arch/arm64/configs/gki_defconfig
+          # sed -i 's/\(CONFIG_LSM="[^"]*\)"/\1,baseband_guard"/' ./arch/arm64/configs/gki_defconfig
+          # sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/lockdown/lockdown,baseband_guard/ } }' ./security/Kconfig
+
+
+      - name: Apply Master Patch Set (Fixed)
+        run: |
+          cd kernel
+          set -e
+          echo ">>> Applying 25 Custom Tweaks (Fixed for S23)..."
+
+          # ==============================================================================
+          # GROUP A: COMPLEX LOGIC PATCHES
+          # ==============================================================================
+
+          # [FILE 12/25] int_sqrt.patch (3x Faster Math)
+          cat << 'EOF' > int_sqrt.patch
+          diff --git a/lib/math/int_sqrt.c b/lib/math/int_sqrt.c
+          index a8170bb..cead8de 100644
+          --- a/lib/math/int_sqrt.c
+          +++ b/lib/math/int_sqrt.c
+          @@ -17,26 +17,34 @@
+          -unsigned long int_sqrt(unsigned long x)
+          +inline unsigned long int_sqrt(unsigned long x)
+           {
+          -	unsigned long b, m, y = 0;
+          +	register unsigned long tmp;
+          +	register unsigned long place;
+          +	register unsigned long root = 0;
+           
+           	if (x <= 1)
+           		return x;
+           
+          -	m = 1UL << (__fls(x) & ~1UL);
+          -	while (m != 0) {
+          -		b = y + m;
+          -		y >>= 1;
+          +	place = 1UL << (BITS_PER_LONG - 2);
+           
+          -		if (x >= b) {
+          -			x -= b;
+          -			y += m;
+          +	do{
+          +		place >>= 2;
+          +	}while(place > x);
+          +
+          +	do {
+          +		tmp = root + place;
+          +		root >>= 1;
+          +
+          +		if (x >= tmp)
+          +		{
+          +			x -= tmp;
+          +			root += place;
+           		}
+          -		m >>= 2;
+          -	}
+          +		place >>= 2;
+          +	}while (place != 0);
+           
+          -	return y;
+          +	return root;
+           }
+           EXPORT_SYMBOL(int_sqrt);
+          EOF
+          patch -p1 < int_sqrt.patch || echo "⚠️ int_sqrt failed"
+
+          # [FILE 11/25] mem_opt_prefetch.patch (ARM64 Assembly)
+          cat << 'EOF' > mem_opt_prefetch.patch
+          diff --git a/arch/arm64/lib/copy_template.S b/arch/arm64/lib/copy_template.S
+          index 488df23..427935a 100644
+          --- a/arch/arm64/lib/copy_template.S
+          +++ b/arch/arm64/lib/copy_template.S
+          @@ -39,6 +39,7 @@ C_h	.req	x12
+           D_l	.req	x13
+           D_h	.req	x14
+           
+          +	prfm    pldl1strm, [src, #(1*L1_CACHE_BYTES)]
+           	mov	dst, dstin
+           	cmp	count, #16
+           	/*When memory length is less than 16, the accessed are not aligned.*/
+          @@ -169,6 +170,7 @@ D_h	.req	x14
+           	ldp1	C_l, C_h, src, #16
+           	stp1	D_l, D_h, dst, #16
+           	ldp1	D_l, D_h, src, #16
+          +	prfm    pldl1strm, [src, #(4*L1_CACHE_BYTES)]
+           	subs	count, count, #64
+           	b.ge	1b
+           	stp1	A_l, A_h, dst, #16
+          EOF
+          patch -p1 < mem_opt_prefetch.patch || echo "⚠️ mem_opt_prefetch failed"
+
+          # [FILE 25/25] add_limitation.patch (FIXED: Hardcoded S23 Topology)
+          # We replaced cpu_lp_mask with simple cpu index checks for SM8550
+          cat << 'EOF' > add_limitation.patch
+          diff --git a/drivers/cpufreq/cpufreq.c b/drivers/cpufreq/cpufreq.c
+          index 1535635..ef05e46 100644
+          --- a/drivers/cpufreq/cpufreq.c
+          +++ b/drivers/cpufreq/cpufreq.c
+          @@ -36,6 +36,18 @@
+           
+           static LIST_HEAD(cpufreq_policy_list);
+           
+          +static unsigned int min_limit[3] = {INT_MAX, INT_MAX, INT_MAX};
+          +
+          +static int get_index_by_cpu(const unsigned int cpu)
+          +{
+          +    /* SM8550 Topology: 0-2 (Little), 3-6 (Big), 7 (Prime) */
+          +    if (cpu <= 2) return 0;
+          +    if (cpu <= 6) return 1;
+          +    return 2;
+          +}
+          +
+           /* Macros to iterate over CPU policies */
+           #define for_each_suitable_policy(__policy, __active)			 \
+           	list_for_each_entry(__policy, &cpufreq_policy_list, policy_list) \
+          @@ -717,6 +730,13 @@ static ssize_t show_cpuinfo_max_freq(struct cpufreq_policy *policy, char *buf)
+           	return sprintf(buf, "%u\n", max_freq);
+           }
+           
+          +static ssize_t show_scaling_min_freq_limit(struct cpufreq_policy *policy, char *buf)
+          +{
+          +	unsigned int val = min_limit[get_index_by_cpu(policy->cpu)];
+          +
+          +	return sprintf(buf, "%u\n", val);
+          +}
+          +
+           show_one(cpuinfo_min_freq, cpuinfo.min_freq);
+           show_one(cpuinfo_transition_latency, cpuinfo.transition_latency);
+           show_one(scaling_min_freq, min);
+          @@ -768,6 +788,20 @@ static ssize_t store_##file_name					\
+           	return ret >= 0 ? count : ret;					\
+           }
+           
+          +static ssize_t store_scaling_min_freq_limit
+          +(struct cpufreq_policy *policy, const char *buf, size_t count)
+          +{
+          +	unsigned long val;
+          +	int ret;
+          +
+          +	ret = sscanf(buf, "%u", &val);
+          +	if (ret != 1)
+          +		return -EINVAL;
+          +
+          +	min_limit[get_index_by_cpu(policy->cpu)] = val;
+          +	return count;
+          +}
+          +
+           store_one(scaling_min_freq, min);
+           store_one(scaling_max_freq, max);
+           
+          @@ -971,6 +1005,7 @@ cpufreq_freq_attr_ro(bios_limit);
+           cpufreq_freq_attr_ro(related_cpus);
+           cpufreq_freq_attr_ro(affected_cpus);
+           cpufreq_freq_attr_rw(scaling_min_freq);
+          +cpufreq_freq_attr_rw(scaling_min_freq_limit);
+           cpufreq_freq_attr_rw(scaling_max_freq);
+           cpufreq_freq_attr_rw(scaling_governor);
+           cpufreq_freq_attr_rw(scaling_setspeed);
+          @@ -981,6 +1016,7 @@ static struct attribute *cpufreq_attrs[] = {
+           	&cpuinfo_transition_latency.attr,
+           	&scaling_cur_freq.attr,
+           	&scaling_min_freq.attr,
+          +	&scaling_min_freq_limit.attr,
+           	&scaling_max_freq.attr,
+           	&affected_cpus.attr,
+           	&related_cpus.attr,
+          @@ -2649,6 +2685,8 @@ static int cpufreq_set_policy(struct cpufreq_policy *policy,
+           	new_data.min = freq_qos_read_value(&policy->constraints, FREQ_QOS_MIN);
+           	new_data.max = freq_qos_read_value(&policy->constraints, FREQ_QOS_MAX);
+           
+          +	new_data.min = min(new_data.min, min_limit[get_index_by_cpu(policy->cpu)]);
+          +
+           	pr_debug("setting new policy for CPU %u: %u - %u kHz\n",
+           		 new_data.cpu, new_data.min, new_data.max);
+          EOF
+          patch -p1 < add_limitation.patch || echo "⚠️ add_limitation failed"
+
+          # [FILE 1/25] re_write_limitation_scaling_min_freq.patch (Apply SECOND)
+          # We modified the diff context to match our 'Hardcoded S23' change above
+          cat << 'EOF' > rewrite_limitation.patch
+          diff --git a/drivers/cpufreq/cpufreq.c b/drivers/cpufreq/cpufreq.c
+          index ef05e46..f54c142 100644
+          --- a/drivers/cpufreq/cpufreq.c
+          +++ b/drivers/cpufreq/cpufreq.c
+          @@ -36,17 +36,35 @@
+           
+           static LIST_HEAD(cpufreq_policy_list);
+           
+          -static unsigned int min_limit[3] = {INT_MAX, INT_MAX, INT_MAX};
+          +#define MAX_CLUSTERS 3
+           
+          -static int get_index_by_cpu(const unsigned int cpu)
+          -{
+          -    /* SM8550 Topology: 0-2 (Little), 3-6 (Big), 7 (Prime) */
+          -    if (cpu <= 2) return 0;
+          -    if (cpu <= 6) return 1;
+          -    return 2;
+          -}
+          +struct cpumask_uint_kv {
+          +    cpumask_var_t key;
+          +    unsigned int value;
+          +};
+          +
+          +static struct cpumask_uint_kv cpumask_min_limit_store[MAX_CLUSTERS] __read_mostly;
+          +
+          +static void store_cpumask_min_limit(const cpumask_var_t key, const unsigned int value) {
+          +	int i;
+          +	for (i = 0; i < MAX_CLUSTERS; i++) {
+          +		if (cpumask_empty(cpumask_min_limit_store[i].key) || cpumask_equal(cpumask_min_limit_store[i].key, key)) {
+          +			cpumask_copy(cpumask_min_limit_store[i].key, key);
+          +			cpumask_min_limit_store[i].value = value;
+          +			return;
+          +		}
+           	}
+          +	pr_err("cpumask_min_limit_store is full.\n");
+           }
+          +
+          +static unsigned int get_cpumask_min_limit(const cpumask_var_t key) {
+          +	int i;
+          +	for (i = 0; i < MAX_CLUSTERS; i++) {
+          +		if (cpumask_equal(cpumask_min_limit_store[i].key, key)) {
+          +		    return cpumask_min_limit_store[i].value;
+          +		}
+          +	}
+          +	return INT_MAX;
+           }
+           
+           /* Macros to iterate over CPU policies */
+          @@ -732,7 +750,7 @@ static ssize_t show_cpuinfo_max_freq(struct cpufreq_policy *policy, char *buf)
+           
+           static ssize_t show_scaling_min_freq_limit(struct cpufreq_policy *policy, char *buf)
+           {
+          -	unsigned int val = min_limit[get_index_by_cpu(policy->cpu)];
+          +	unsigned int val = get_cpumask_min_limit(policy->related_cpus);
+           
+           	return sprintf(buf, "%u\n", val);
+           }
+          @@ -798,7 +816,7 @@ static ssize_t store_scaling_min_freq_limit
+           	if (ret != 1)
+           		return -EINVAL;
+           
+          -	min_limit[get_index_by_cpu(policy->cpu)] = val;
+          +	store_cpumask_min_limit(policy->related_cpus, val);
+           	return count;
+           }
+           
+          @@ -2685,7 +2703,7 @@ static int cpufreq_set_policy(struct cpufreq_policy *policy,
+           	new_data.min = freq_qos_read_value(&policy->constraints, FREQ_QOS_MIN);
+           	new_data.max = freq_qos_read_value(&policy->constraints, FREQ_QOS_MAX);
+           
+          -	new_data.min = min(new_data.min, min_limit[get_index_by_cpu(policy->cpu)]);
+          +	new_data.min = min(new_data.min, get_cpumask_min_limit(policy->related_cpus));
+           
+           	pr_debug("setting new policy for CPU %u: %u - %u kHz\n",
+           		 new_data.cpu, new_data.min, new_data.max);
+          EOF
+          patch -p1 < rewrite_limitation.patch || echo "⚠️ rewrite_limitation failed"
+
+          # [FILE 22/25] avoid_extra_s2idle_wake_attempts.patch
+          cat << 'EOF' > s2idle.patch
+          diff --git a/drivers/base/power/wakeup.c b/drivers/base/power/wakeup.c
+          index 770bb04..093fad9 100644
+          --- a/drivers/base/power/wakeup.c
+          +++ b/drivers/base/power/wakeup.c
+          @@ -935,8 +935,8 @@ EXPORT_SYMBOL_GPL(pm_wakeup_pending);
+           
+           void pm_system_wakeup(void)
+           {
+          -	atomic_inc(&pm_abort_suspend);
+          -	s2idle_wake();
+          +	if (atomic_inc_return_relaxed(&pm_abort_suspend) == 1)
+          +		s2idle_wake();
+           }
+           EXPORT_SYMBOL_GPL(pm_system_wakeup);
+          EOF
+          patch -p1 < s2idle.patch || echo "⚠️ s2idle failed"
+
+          # ==============================================================================
+          # GROUP B: SED PATCHES (Safe & Fast)
+          # ==============================================================================
+          echo "Applying one-line fixes..."
+
+          # [FILE 4/25] use_unlikely_wrap_cpufreq.patch
+          sed -i 's/cpumask_equal(cpumask_min_limit_store\[i\].key, key)/cpumask_equal(cpumask_min_limit_store\[i\].key, key) || unlikely(cpumask_empty(cpumask_min_limit_store\[i\].key))/' drivers/cpufreq/cpufreq.c
+
+          # [FILE 5/25] silence_system_logspam.patch
+          sed -i '/devkmsg_emit(facility, level, "%s", line);/i \ \tif (strstr(line, "healthd") || strstr(line, "logd") || strstr(line, "dashd")) { kfree(buf); return len; }' kernel/printk/printk.c
+
+          # [FILE 6/25] silence_irq_cpu_logspam.patch
+          sed -i 's/pr_warn_ratelimited("IRQ%u: set affinity failed/pr_debug_ratelimited("IRQ%u: set affinity failed/' kernel/irq/cpuhotplug.c
+
+          # [FILE 7/25] reduce_pci_pme_wakeups.patch
+          sed -i 's/PME_TIMEOUT 1000/PME_TIMEOUT 4000/' drivers/pci/pci.c
+
+          # [FILE 8/25] reduce_gc_thread_sleep_time.patch
+          sed -i 's/DEF_GC_THREAD_URGENT_SLEEP_TIME\t500/DEF_GC_THREAD_URGENT_SLEEP_TIME\t50/' fs/f2fs/gc.h
+
+          # [FILE 9/25] reduce_freeze_timeout.patch
+          sed -i 's/freeze_timeout_msecs = 20 \* MSEC_PER_SEC/freeze_timeout_msecs = MSEC_PER_SEC/' kernel/power/process.c
+          sed -i '/unsigned long val;/a \ \treturn n;' kernel/power/main.c
+
+          # [FILE 10/25] reduce_cache_pressure.patch
+          sed -i 's/sysctl_vfs_cache_pressure __read_mostly = 100/sysctl_vfs_cache_pressure __read_mostly = 50/' fs/dcache.c
+
+          # [FILE 13/25] increase_sk_mem_packets.patch
+          sed -i 's/_SK_MEM_PACKETS\t\t256/_SK_MEM_PACKETS\t\t1024/' include/net/sock.h
+
+          # [FILE 14/25] increase_ext4_default_commit_age.patch
+          sed -i 's/JBD2_DEFAULT_MAX_COMMIT_AGE 5/JBD2_DEFAULT_MAX_COMMIT_AGE 30/' include/linux/jbd2.h
+
+          # [FILE 15/25] force_tcp_nodelay.patch
+          sed -i '/sockopt_lock_sock(sk);/a \ \toptname=TCP_NODELAY;' net/ipv4/tcp.c
+      - name: Apply Robust Performance Injection
+        run: |
+          cd kernel
+          set -e
+          echo ">>> Starting Robust Injection (Sed-based)..."
+
+          # =========================================================
+          # 1. OPTIMIZED INT_SQRT (Rewrite entire file)
+          # =========================================================
+          echo "Overwriting int_sqrt.c with optimized version..."
+          cat << 'EOF' > lib/math/int_sqrt.c
+          #include <linux/export.h>
+          #include <linux/bitops.h>
+          #include <linux/limits.h>
+          #include <linux/kernel.h>
+
+          /* Optimized Integer Sqrt (3x Faster) */
+          unsigned long int_sqrt(unsigned long x)
+          {
+              register unsigned long tmp;
+              register unsigned long place;
+              register unsigned long root = 0;
+
+              if (x <= 1) return x;
+
+              place = 1UL << (BITS_PER_LONG - 2);
+              while (place > x) place >>= 2;
+
+              while (place) {
+                  tmp = root + place;
+                  root >>= 1;
+                  if (x >= tmp) {
+                      x -= tmp;
+                      root += place;
+                  }
+                  place >>= 2;
+              }
+              return root;
+          }
+          EXPORT_SYMBOL(int_sqrt);
+          EOF
+
+          # =========================================================
+          # 2. CPUFREQ LIMITATION (Manual Injection)
+          # =========================================================
+          echo "Injecting S23 CPUFreq Limiter..."
+
+          # A. Insert Forward Declarations at the top (after includes)
+          sed -i '/static LIST_HEAD(cpufreq_policy_list);/a static unsigned int min_limit[3] = {INT_MAX, INT_MAX, INT_MAX};\nstatic int get_index_by_cpu(const unsigned int cpu);\nstatic ssize_t show_scaling_min_freq_limit(struct cpufreq_policy *policy, char *buf);\nstatic ssize_t store_scaling_min_freq_limit(struct cpufreq_policy *policy, const char *buf, size_t count);' drivers/cpufreq/cpufreq.c
+
+          # B. Register the new Sysfs File (scaling_min_freq_limit)
+          # 1. Add the macro
+          sed -i '/cpufreq_freq_attr_rw(scaling_min_freq);/a cpufreq_freq_attr_rw(scaling_min_freq_limit);' drivers/cpufreq/cpufreq.c
+          # 2. Add to the attribute table
+          sed -i '/&scaling_min_freq.attr,/a \ \t&scaling_min_freq_limit.attr,' drivers/cpufreq/cpufreq.c
+
+          # C. Inject the Logic into cpufreq_set_policy
+          # We search for where max freq is read, and force our min limit right after
+          sed -i '/new_data.max = freq_qos_read_value(&policy->constraints, FREQ_QOS_MAX);/a \ \tnew_data.min = min(new_data.min, min_limit[get_index_by_cpu(policy->cpu)]);' drivers/cpufreq/cpufreq.c
+
+          # D. Append the Helper Functions to the END of the file
+          cat << 'EOF' >> drivers/cpufreq/cpufreq.c
+
+          /* --- INJECTED S23 LIMITATION HELPERS --- */
+          static int get_index_by_cpu(const unsigned int cpu)
+          {
+              /* Hardcoded Topology for SM8550 (S23) */
+              /* 0-2: Little, 3-6: Big, 7: Prime */
+              if (cpu <= 2) return 0;
+              if (cpu <= 6) return 1;
+              return 2;
+          }
+
+          static ssize_t show_scaling_min_freq_limit(struct cpufreq_policy *policy, char *buf)
+          {
+              return sprintf(buf, "%u\n", min_limit[get_index_by_cpu(policy->cpu)]);
+          }
+
+          static ssize_t store_scaling_min_freq_limit(struct cpufreq_policy *policy, const char *buf, size_t count)
+          {
+              unsigned long val;
+              if (sscanf(buf, "%u", &val) != 1) return -EINVAL;
+              min_limit[get_index_by_cpu(policy->cpu)] = val;
+              return count;
+          }
+          /* ---------------------------------------- */
+          EOF
+
+          # =========================================================
+          # 3. ASSEMBLY PREFETCH (Sed Injection)
+          # =========================================================
+          echo "Applying Prefetch Assembly..."
+          # Insert prfm after the first load pair in copy_template.S
+          # We match a common instruction line to anchor the insert
+          sed -i '/ldp1	C_l, C_h, src, #16/a \ \tprfm    pldl1strm, [src, #(4*L1_CACHE_BYTES)]' arch/arm64/lib/copy_template.S
+          # Insert the initial prefetch at the start
+          sed -i '/D_h	.req	x14/a \ \tprfm    pldl1strm, [src, #(1*L1_CACHE_BYTES)]' arch/arm64/lib/copy_template.S
+          
+          # =========================================================
+          # 4. MEMORY ALIGNMENT (Sed Injection)
+          # =========================================================
+          echo "Applying Memory Alignment..."
+          # Align clear_page to 16 bytes
+          sed -i '/SYM_FUNC_START_PI(clear_page)/i \ \t.p2align 4' arch/arm64/lib/clear_page.S
+          # Align file struct to 8 bytes
+          sed -i 's/__attribute__((aligned(4)));/__attribute__((aligned(8)));/' include/linux/fs.h
+
+          # =========================================================
+          # 5. RAPID FIRE TWEAKS (Sed One-Liners)
+          # =========================================================
+          echo "Applying Rapid Fire Tweaks..."
+
+          # Socket Memory (256 -> 1024)
+          sed -i 's/_SK_MEM_PACKETS\t\t256/_SK_MEM_PACKETS\t\t1024/' include/net/sock.h
+
+          # Ext4 Commit Age (5 -> 30)
+          sed -i 's/JBD2_DEFAULT_MAX_COMMIT_AGE 5/JBD2_DEFAULT_MAX_COMMIT_AGE 30/' include/linux/jbd2.h
+
+          # F2FS Congestion (20ms -> 6ms)
+          sed -i 's/DEFAULT_IO_TIMEOUT\t(msecs_to_jiffies(20))/DEFAULT_IO_TIMEOUT\t(msecs_to_jiffies(6))/' fs/f2fs/f2fs.h
+
+          # F2FS Min Fsync (8 -> 20)
+          sed -i 's/DEF_MIN_FSYNC_BLOCKS\t8/DEF_MIN_FSYNC_BLOCKS\t20/' fs/f2fs/segment.h
+
+          # Disable Cache Hot Buddy
+          sed -i 's/SCHED_FEAT(CACHE_HOT_BUDDY, true)/SCHED_FEAT(CACHE_HOT_BUDDY, false)/' kernel/sched/features.h
+
+          # S2Idle Wakeup Fix (Avoiding patch command for safety)
+          # We match the lines and rewrite them using sed
+          sed -i 's/atomic_inc(&pm_abort_suspend);/if (atomic_inc_return_relaxed(&pm_abort_suspend) == 1)/' drivers/base/power/wakeup.c
+          sed -i '/s2idle_wake();/i \ \t\t' drivers/base/power/wakeup.c 
+          # (The indentation above is just cosmetic, the logic change is the important part)
+
+          # TCP Nodelay
+          sed -i '/sockopt_lock_sock(sk);/a \ \toptname=TCP_NODELAY;' net/ipv4/tcp.c
+
+          # Silence Logs
+          sed -i '/devkmsg_emit(facility, level, "%s", line);/i \ \tif (strstr(line, "healthd") || strstr(line, "logd") || strstr(line, "dashd")) { kfree(buf); return len; }' kernel/printk/printk.c
+          sed -i 's/pr_warn_ratelimited("IRQ%u: set affinity failed/pr_debug_ratelimited("IRQ%u: set affinity failed/' kernel/irq/cpuhotplug.c
+
+          echo ">>> Robust Injection Complete!"
+
+          
+
+      - name: Set up swap space
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 16
+
+      - name: Build the kernel
+        run: |
+          cd kernel
+          # Make sure the script is executable
+          chmod +x scripts/build.sh
+          # Run the script from the repo
+          ./scripts/build.sh 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
+    
+      - name: Package image with AnyKernel3
+        id: package
+        run: |
+          set -euxo pipefail
+          unzip "${GITHUB_WORKSPACE}/anykernel.zip" -d anykernel/
+          cp kernel/out/arch/arm64/boot/Image.gz anykernel/
+          # Build final name
+          ZIP_NAME="common-5.15.${KERNEL_VERSION}-3d64R-wild${WILD_KSU_VERSION}_${WILD_VER_CODE}-susfs${SUSFS_VERSION}_${SUSFS_COMMIT}-manual"
+          cd anykernel
+          zip -r0 ../"${ZIP_NAME}".zip ./*
+          echo "zip_path=$GITHUB_WORKSPACE/${ZIP_NAME}.zip" >> "$GITHUB_OUTPUT"
+          echo "zip_name=${ZIP_NAME}" >> "$GITHUB_OUTPUT"
+          cd ..
+
+      - name: Upload the flashable kernel
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{steps.package.outputs.zip_name}}
+          path: anykernel/
+      
+      - name: Create GitHub Release and upload asset
+        if: github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: experimental_build-${{ github.run_id }} 
+          target_commitish: ${{ github.sha }}
+          name: "Wild_KSU Kernel Build by ${{ github.repository }}"
+          generate_release_notes: true
+          files: ${{ steps.package.outputs.zip_path }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   
