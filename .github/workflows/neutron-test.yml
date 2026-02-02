@@ -806,4 +806,4 @@ jobs:
           generate_release_notes: true
           files: ${{ steps.package.outputs.zip_path }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}   
