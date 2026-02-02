@@ -22,8 +22,6 @@ jobs:
 
       - name: Clone source
         run: |
-          #git clone --depth=1 -b android13-5.15 https://github.com/samsung-sm8550/kernel_samsung_sm8550-common.git kernel
-          #git clone --depth=1 -b android13-5.15 https://github.com/naoyukikun/kernel_samsung_sm8550-common.git kernel
           git clone --depth=1 -b main https://github.com/naoyukikun/s23-custom-kernel.git kernel
 
           # Determine the current kernel version
@@ -760,6 +758,9 @@ jobs:
           # Silence Logs
           sed -i '/devkmsg_emit(facility, level, "%s", line);/i \ \tif (strstr(line, "healthd") || strstr(line, "logd") || strstr(line, "dashd")) { kfree(buf); return len; }' kernel/printk/printk.c
           sed -i 's/pr_warn_ratelimited("IRQ%u: set affinity failed/pr_debug_ratelimited("IRQ%u: set affinity failed/' kernel/irq/cpuhotplug.c
+          # [FIX] SUSFS Compile Error (Missing copy_flags variable)
+          # We search for the function 'copy_mnt_ns' variable declaration and insert 'copy_flags' after it.
+          sed -i '/struct mnt_namespace \*new_ns;/a \ \tint copy_flags = 0;' fs/namespace.c
 
           echo ">>> Robust Injection Complete!"
 
