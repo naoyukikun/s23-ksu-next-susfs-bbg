@@ -785,14 +785,6 @@ jobs:
           #endif
           EOF
 
-          # ---------------------------------------------------------
-          # 4. DISABLE SAMSUNG SECURITY (Prevent Knox Bootloop)
-          # ---------------------------------------------------------
-          echo "Disabling Samsung Security..."
-          echo "CONFIG_SECURITY_DEFEX=n" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_SEC_ROOT_PA_PROT=n" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_RKP_CFP_JOPP=n" >> arch/arm64/configs/gki_defconfig
-          echo "CONFIG_RKP_KDP=n" >> arch/arm64/configs/gki_defconfig
 
           # ---------------------------------------------------------
           # 5. CLEAN CONFIG (Ensure build passes)
