@@ -765,6 +765,9 @@ jobs:
 
           echo ">>> Robust Injection Complete!"
 
+          echo "Patching rwonce.h..."
+          sed -i 's/union { __unqual_scalar_typeof/union { typeof/' arch/arm64/include/asm/rwonce.h
+
           
 
       - name: Set up swap space
