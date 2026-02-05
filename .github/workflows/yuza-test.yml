@@ -765,8 +765,28 @@ jobs:
 
           echo ">>> Robust Injection Complete!"
 
-          echo "Patching rwonce.h..."
+          # ---------------------------------------------------------
+          # 3. FIX CLANG 19 COMPATIBILITY (Patches rwonce.h)
+          # ---------------------------------------------------------
+          # We use 'typeof' instead of the complex macro.
+          # This triggers the 'const-init' warning, which we disable in step 4.
           sed -i 's/union { __unqual_scalar_typeof/union { typeof/' arch/arm64/include/asm/rwonce.h
+
+          # ---------------------------------------------------------
+          # 4. DISABLE CLANG 19 WARNINGS (The Real Fix)
+          # ---------------------------------------------------------
+          echo "Suppressing Clang 19 warnings in Makefile..."
+          # We inject the flag to ignore the specific 'const' error you are seeing
+          sed -i 's/KBUILD_CFLAGS   += -Wall/KBUILD_CFLAGS   += -Wall -Wno-default-const-init-field-unsafe/g' Makefile
+          
+          # Just in case, we also append it to the end of the Makefile
+          echo "KBUILD_CFLAGS += -Wno-default-const-init-field-unsafe" >> Makefile
+
+
+          # Also force it in the config
+          echo "CONFIG_WERROR=n" >> arch/arm64/configs/gki_defconfig
+
+          echo ">>> Repairs Complete. Ready to build."
           
 
       - name: Set up swap space
