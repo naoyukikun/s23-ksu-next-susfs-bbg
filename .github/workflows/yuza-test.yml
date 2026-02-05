@@ -765,26 +765,38 @@ jobs:
 
           echo ">>> Robust Injection Complete!"
 
-          echo "Replacing broken READ_ONCE macro..."
+          # ---------------------------------------------------------
+          # 3. FIX READ_ONCE (COMPLETE OVERWRITE)
+          # ---------------------------------------------------------
+          # The old file is corrupt. We delete it and write a clean, safe version.
+          echo "Overwriting rwonce.h with generic implementation..."
           
-          # Delete the original complex macro (6 lines)
-          sed -i '/#define __READ_ONCE(x)/,+6d' arch/arm64/include/asm/rwonce.h
+          cat <<EOF > arch/arm64/include/asm/rwonce.h
+          #ifndef __ASM_RWONCE_H
+          #define __ASM_RWONCE_H
+
+          /* * Replaced with Generic implementation to fix Clang 19+ build errors.
+           * This forces a volatile read, preventing bootloops and 'const' warnings.
+           */
+          #define __READ_ONCE(x) (*(const volatile typeof(x) *)&(x))
+
+          #include <asm-generic/rwonce.h>
           
-          # Insert the safe Generic definition
-          sed -i '/#ifndef __ASM_RWONCE_H/a #define __READ_ONCE(x) (*(const volatile typeof(x) *)&(x))' arch/arm64/include/asm/rwonce.h
+          #endif
+          EOF
 
           # ---------------------------------------------------------
-          # 4. DISABLE CLANG 19 WARNINGS (The Real Fix)
+          # 4. DISABLE SAMSUNG SECURITY (Prevent Knox Bootloop)
           # ---------------------------------------------------------
-          echo "Suppressing Clang 19 warnings in Makefile..."
-          # We inject the flag to ignore the specific 'const' error you are seeing
-          sed -i 's/KBUILD_CFLAGS   += -Wall/KBUILD_CFLAGS   += -Wall -Wno-default-const-init-field-unsafe/g' Makefile
-          
-          # Just in case, we also append it to the end of the Makefile
-          echo "KBUILD_CFLAGS += -Wno-default-const-init-field-unsafe" >> Makefile
+          echo "Disabling Samsung Security..."
+          echo "CONFIG_SECURITY_DEFEX=n" >> arch/arm64/configs/gki_defconfig
+          echo "CONFIG_SEC_ROOT_PA_PROT=n" >> arch/arm64/configs/gki_defconfig
+          echo "CONFIG_RKP_CFP_JOPP=n" >> arch/arm64/configs/gki_defconfig
+          echo "CONFIG_RKP_KDP=n" >> arch/arm64/configs/gki_defconfig
 
-
-          # Also force it in the config
+          # ---------------------------------------------------------
+          # 5. CLEAN CONFIG (Ensure build passes)
+          # ---------------------------------------------------------
           echo "CONFIG_WERROR=n" >> arch/arm64/configs/gki_defconfig
 
           echo ">>> Repairs Complete. Ready to build."
