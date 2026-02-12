@@ -148,7 +148,12 @@ jobs:
           find drivers/char/lrng/ -name "*.c" -exec sed -i 's/BUILD_BUG_ON/(void)/g' {} +
 
           DEFCONFIG="arch/arm64/configs/gki_defconfig"
+          
+          # We do this separately so we don't break the file handle
+          sed -i 's/CONFIG_CRYPTO_RNG_DEFAULT=y/# CONFIG_CRYPTO_RNG_DEFAULT is not set/' $DEFCONFIG
+          
           {
+            echo "CONFIG_CRYPTO_RNG_DEFAULT=n"
             echo "CONFIG_LRNG=y"
             echo "CONFIG_LRNG_DRNG_ATOMIC=y"
           } >> $DEFCONFIG
