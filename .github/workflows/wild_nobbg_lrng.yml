@@ -146,6 +146,11 @@ jobs:
           # The build failed with "sizeof(buflen) < LRNG_KCAPI_ALIGN", so we MUST disable this check.
           echo "Neutralizing BUILD_BUG_ON in all LRNG files..."
           find drivers/char/lrng/ -name "*.c" -exec sed -i 's/BUILD_BUG_ON/(void)/g' {} +
+
+          sed -i 's/CONFIG_CRYPTO_RNG_DEFAULT=y/# CONFIG_CRYPTO_RNG_DEFAULT is not set/' arch/arm64/configs/gki_defconfig
+          echo "CONFIG_CRYPTO_RNG_DEFAULT=n" >> ./arch/arm64/configs/gki_defconfig
+          echo "CONFIG_LRNG=y" >> ./arch/arm64/configs/gki_defconfig
+          echo "CONFIG_LRNG_DRNG_ATOMIC=y" >> ./arch/arm64/configs/gki_defconfig
           
 
       - name: Set up swap space
