@@ -70,12 +70,6 @@ jobs:
           patch -p1 --fuzz=3 < manual-hook.patch
           echo "CONFIG_KSU_KPROBES_HOOK=n" >> ./arch/arm64/configs/gki_defconfig
           echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> ./arch/arm64/configs/gki_defconfig   
-
-          # Adding BBG support
-          # wget -O- https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
-          # echo "CONFIG_BBG=y" >> ./arch/arm64/configs/gki_defconfig
-          # sed -i 's/\(CONFIG_LSM="[^"]*\)"/\1,baseband_guard"/' ./arch/arm64/configs/gki_defconfig
-          # sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/lockdown/lockdown,baseband_guard/ } }' ./security/Kconfig
           
 
       - name: Set up swap space
