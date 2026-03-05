@@ -37,12 +37,12 @@ jobs:
         run: |
           set -euxo pipefail
           cd kernel
-          # Determine the tag of the latest release of KernelSU Next
+          # Determine the tag of the latest release of KernelSU Next (filtered for legacy-susfs)
           echo "KSUNEXT_VERSION=$(curl -s "https://api.github.com/repos/KernelSU-Next/KernelSU-Next/tags" \
-          | jq -r '.[0].name' | sed 's/^v//' | tr -d '.')" >> $GITHUB_ENV
+          | jq -r '[.[] | select(.name | contains("legacy-susfs"))][0].name' | sed 's/^v//' | tr -d '.')" >> $GITHUB_ENV
 
-          # Integrate the latest next-susfs version of KernelSU Next into the source
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next-susfs
+          # Integrate the legacy_susfs version of KernelSU Next into the source
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/legacy_susfs/kernel/setup.sh" | bash -s legacy_susfs
 
           # Compute version code = commit count + 10200 (same scheme as KernelSU CI)
           COMMITS="$(git -C "./KernelSU-Next" rev-list --count HEAD || echo 0)"
@@ -94,7 +94,7 @@ jobs:
           unzip "${GITHUB_WORKSPACE}/anykernel.zip" -d anykernel/
           cp kernel/out/arch/arm64/boot/Image.gz anykernel/
           # Build final name
-          ZIP_NAME="common-5.15.${KERNEL_VERSION}-3d64R-next${KSUNEXT_VERSION}_${NEXT_VER_CODE}-susfs${SUSFS_VERSION}_${SUSFS_COMMIT}-manual-BBG-$(date +%d%m%y-%H%M%S)"
+          ZIP_NAME="common-5.15.${KERNEL_VERSION}-3d64R-next${KSUNEXT_VERSION}_${NEXT_VER_CODE}-susfs${SUSFS_VERSION}_${SUSFS_COMMIT}-manual"
           cd anykernel
           zip -r0 ../"${ZIP_NAME}".zip ./*
           echo "zip_path=$GITHUB_WORKSPACE/${ZIP_NAME}.zip" >> "$GITHUB_OUTPUT"
