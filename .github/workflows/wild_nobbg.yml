@@ -30,7 +30,7 @@ jobs:
           # Determine the current kernel version
           echo "KERNEL_VERSION=$(grep -m1 '^SUBLEVEL =' ./kernel/Makefile | awk '{print $3}')" >> $GITHUB_ENV
           
-      - name: Apply the Wild_KSU, SUSFS, manual hooks patch and Baseband Guard
+      - name: Apply the Wild_KSU, SUSFS, manual hooks patch
         run: |
           set -euxo pipefail
           cd kernel
@@ -38,8 +38,8 @@ jobs:
           echo "WILD_KSU_VERSION=$(curl -s "https://api.github.com/repos/Wildkernels/Wild_KSU/tags" \
           | jq -r '.[0].name' | sed 's/^v//' | tr -d '.')" >> $GITHUB_ENV
 
-          # Integrate the latest version of Wild_KSU into the source
-          curl -LSs "https://raw.githubusercontent.com/WildKernels/Wild_KSU/wild/kernel/setup.sh" | bash -s wild
+          # Integrate the canary version of Wild_KSU into the source
+          curl -LSs "https://raw.githubusercontent.com/WildKernels/Wild_KSU/canary/kernel/setup.sh" | bash -s canary
           
 
           # Compute version code = commit count + 10200 (same scheme as KernelSU CI)
