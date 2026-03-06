@@ -37,12 +37,12 @@ jobs:
         run: |
           set -euxo pipefail
           cd kernel
-          # Determine the tag of the latest release of KernelSU Next (filtered for legacy-susfs)
+          # Determine the tag of the latest release of KernelSU Next
           echo "KSUNEXT_VERSION=$(curl -s "https://api.github.com/repos/KernelSU-Next/KernelSU-Next/tags" \
-          | jq -r '[.[] | select(.name | contains("legacy-susfs"))][0].name' | sed 's/^v//' | tr -d '.')" >> $GITHUB_ENV
+          | jq -r '.[0].name' | sed 's/^v//' | tr -d '.')" >> $GITHUB_ENV
 
-          # Integrate the legacy_susfs version of KernelSU Next into the source
-          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/legacy_susfs/kernel/setup.sh" | bash -s legacy_susfs
+          # Integrate the latest next-susfs version of KernelSU Next into the source
+          curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s next-susfs
 
           # Compute version code = commit count + 10200 (same scheme as KernelSU CI)
           COMMITS="$(git -C "./KernelSU-Next" rev-list --count HEAD || echo 0)"
@@ -73,8 +73,7 @@ jobs:
           curl -L -o manual-hook.patch https://github.com/SukiSU-Ultra/SukiSU_patch/raw/83aa64b7548890bb1f2eff6c990c03a1802df27b/hooks/scope_min_manual_hooks_v1.6.patch
           patch -p1 --fuzz=3 < manual-hook.patch
           echo "CONFIG_KSU_KPROBES_HOOK=n" >> ./arch/arm64/configs/gki_defconfig
-          echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> ./arch/arm64/configs/gki_defconfig
-          
+          echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> ./arch/arm64/configs/gki_defconfig  
           
 
       - name: Set up swap space
