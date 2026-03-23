@@ -39,7 +39,7 @@ jobs:
           | jq -r '.[0].name' | sed 's/^v//' | tr -d '.')" >> $GITHUB_ENV
 
           # Integrate the canary version of Wild_KSU into the source
-          curl -LSs "https://raw.githubusercontent.com/WildKernels/Wild_KSU/canary/kernel/setup.sh" | bash -s canary
+          curl -LSs "https://raw.githubusercontent.com/WildKernels/Wild_KSU/wild/kernel/setup.sh" | bash -s canary
           
 
           # Compute version code = commit count + 10200 (same scheme as KernelSU CI)
