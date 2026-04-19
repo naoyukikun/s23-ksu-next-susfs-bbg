@@ -1,5 +1,5 @@
 # Script github action kanged from Ivan @reddxae with little bit my modification and addition
-name: Build kernel (Wild_KSU, SUSFS 2.0, Manual hooks 1.6 and BBG integration)
+name: Build kernel (Wild_KSU, SUSFS 2.0, Manual hooks 1.6)
 on:
   #schedule:
     #- cron: '0 4 * * *'  # Runs every day at 04:00 UTC
@@ -70,12 +70,6 @@ jobs:
           patch -p1 --fuzz=3 < manual-hook.patch
           echo "CONFIG_KSU_KPROBES_HOOK=n" >> ./arch/arm64/configs/gki_defconfig
           echo "CONFIG_KSU_SUSFS_SUS_SU=n" >> ./arch/arm64/configs/gki_defconfig   
-
-          # Adding BBG support
-          wget -O- https://github.com/vc-teahouse/Baseband-guard/raw/main/setup.sh | bash
-          echo "CONFIG_BBG=y" >> ./arch/arm64/configs/gki_defconfig
-          sed -i 's/\(CONFIG_LSM="[^"]*\)"/\1,baseband_guard"/' ./arch/arm64/configs/gki_defconfig
-          sed -i '/^config LSM$/,/^help$/{ /^[[:space:]]*default/ { /baseband_guard/! s/lockdown/lockdown,baseband_guard/ } }' ./security/Kconfig
           
 
       - name: Set up swap space
@@ -96,7 +90,7 @@ jobs:
           unzip "${GITHUB_WORKSPACE}/anykernel.zip" -d anykernel/
           cp kernel/out/arch/arm64/boot/Image.gz anykernel/
           # Build final name
-          ZIP_NAME="common-5.15.${KERNEL_VERSION}-3d64R-wild${WILD_KSU_VERSION}_${WILD_VER_CODE}-susfs${SUSFS_VERSION}_${SUSFS_COMMIT}-manual-BBG-$(date +%d%m%y-%H%M%S)"
+          ZIP_NAME="common-5.15.${KERNEL_VERSION}-3d64R-wild${WILD_KSU_VERSION}_${WILD_VER_CODE}-susfs${SUSFS_VERSION}_${SUSFS_COMMIT}-manual"
           cd anykernel
           zip -r0 ../"${ZIP_NAME}".zip ./*
           echo "zip_path=$GITHUB_WORKSPACE/${ZIP_NAME}.zip" >> "$GITHUB_OUTPUT"
