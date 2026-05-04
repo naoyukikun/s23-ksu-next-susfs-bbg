@@ -44,7 +44,11 @@ jobs:
           # Integrate the latest next-susfs DEV version of KernelSU Next DEV into the source
           curl -LSs "https://raw.githubusercontent.com/KernelSU-Next/KernelSU-Next/next/kernel/setup.sh" | bash -s dev
 
+          cd KernelSU-Next
+          git checkout 551ad80473f60e052917aec08abf5323b6ab2f7c
+
           # Compute version code = commit count + 10200 (same scheme as KernelSU CI)
+          cd kernel
           COMMITS="$(git -C "./KernelSU-Next" rev-list --count HEAD || echo 0)"
           NEXT_VER_CODE=$((30000 + COMMITS))
           echo "NEXT_VER_CODE=$NEXT_VER_CODE" >> "$GITHUB_ENV"
